@@ -11,11 +11,11 @@ func _init() -> void:
 		while sim.s["over"] == null:
 			if sim.s["event"] != null:
 				EventBook.resolve(sim, 0)
-			for sh in sim.ships_of(GameData.PLAYER):
+			for sh in sim.ships_of(sim.pid()):
 				if sim.docked(sh):
 					AiPlayer.ship_turn(sim, sh)
 			if sim.s["day"] % GameData.DAYS_MONTH == 1:
-				AiPlayer.monthly(sim, GameData.PLAYER)
+				AiPlayer.monthly(sim, sim.pid())
 			sim.advance_day()
 			for hid in GameData.HOUSE_IDS:
 				var k: String = "%s%d" % [hid, sim.house(hid)["lh"]["stage"]]

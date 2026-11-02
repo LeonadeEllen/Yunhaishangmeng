@@ -14,6 +14,7 @@ var _game_on := false
 var _port := ""                  # port shown in the side panel
 var _tab := 0
 var _modal_open := false
+var _difficulty := 1
 
 # nodes
 var map: Control
@@ -43,6 +44,15 @@ func _ready() -> void:
 	RenderingServer.set_default_clear_color(Color("cfe0e3"))
 	for n in ["coin", "click", "sail", "bell", "gong", "bad", "page"]:
 		_sfx[n] = load("res://assets/sfx/%s.wav" % n)
+	var music := AudioStreamPlayer.new()
+	var ms: AudioStreamOggVorbis = load("res://assets/sfx/music.ogg")
+	ms.loop = true
+	music.stream = ms
+	music.volume_db = -13.0
+	music.name = "Music"
+	add_child(music)
+	_sfx_players.append(music)   # keeps it alive across screen changes
+	music.play()
 	for i in 4:
 		var ap := AudioStreamPlayer.new()
 		ap.volume_db = -8.0
@@ -58,7 +68,7 @@ func sfx(name: String) -> void:
 	if not _sfx.has(name):
 		return
 	for ap in _sfx_players:
-		if not ap.playing:
+		if ap.name != "Music" and not ap.playing:
 			ap.stream = _sfx[name]
 			ap.play()
 			return
@@ -99,11 +109,11 @@ func _show_title() -> void:
 	card.add_child(v)
 	v.add_child(UiKit.label("AIRSHIP TRADE  ·  霞市篇  ·  0.1", 13, UiKit.BRASS, true))
 	v.add_child(UiKit.label("云海商盟", 72, UiKit.INK, true))
-	v.add_child(UiKit.para("大地沉入云海之后，人们住在浮空岛上，靠飞艇沿气流往来。老水手说，十年后初风暴将席卷霞市。率领灯油行会跑商、扩张船队、经营产业，赶在对手之前点亮三层灯塔。", 17))
+	v.add_child(UiKit.para("大地沉入云海之后，人们住在浮空岛上，靠飞艇沿气流往来。老水手说，十年后初风暴将席卷霞市。率领一家商会跑商、扩张船队、经营产业，赶在对手之前点亮三层灯塔。", 17))
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 12)
 	v.add_child(row)
-	row.add_child(UiKit.button("  新的一局  ", func(): _start(false)))
+	row.add_child(UiKit.button("  新的一局  ", _pick_house))
 	var cont := UiKit.button("继续航程", func(): _start(true), true)
 	cont.disabled = not FileAccess.file_exists(SAVE_PATH)
 	row.add_child(cont)
@@ -112,40 +122,99 @@ func _show_title() -> void:
 	card.position = Vector2(90, size.y - card.size.y - 70)
 
 
+func _pick_house() -> void:
+	if modal_layer == null:
+		modal_layer = Control.new()
+		modal_layer.set_anchors_preset(Control.PRESET_FULL_RECT)
+		modal_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(modal_layer)
+	var v := _modal("选择你的商会", "", ["三家商会同时争夺霞市盟主。你选一家，另外两家就是对手。"], [["返回", func(): _close_modal(), true]], 980)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 14)
+	for hid in GameData.HOUSE_IDS:
+		var d: Dictionary = GameData.HOUSES[hid]
+		var card := PanelContainer.new()
+		card.add_theme_stylebox_override("panel", UiKit.box(Color("fbf5e6"), Color(UiKit.BRASS, 0.7), 8, 1, 14))
+		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var cv := VBoxContainer.new()
+		cv.add_theme_constant_override("separation", 6)
+		card.add_child(cv)
+		var top := HBoxContainer.new()
+		top.add_child(UiKit.icon(UiKit.sprite("leaders", d["portrait"]), 96))
+		var tv := VBoxContainer.new()
+		tv.add_theme_constant_override("separation", 2)
+		var nm := HBoxContainer.new()
+		nm.add_child(UiKit.icon(UiKit.sprite("emblems", d["emblem"]), 28))
+		nm.add_child(UiKit.label(d["name"], 21, UiKit.INK, true))
+		tv.add_child(nm)
+		tv.add_child(UiKit.label("当家 · %s" % d["leader"], 14, UiKit.MUTED))
+		tv.add_child(UiKit.label("母港 · %s" % GameData.port_name(d["home"]), 14, UiKit.MUTED))
+		top.add_child(tv)
+		cv.add_child(top)
+		cv.add_child(UiKit.label("特长：" + d["perk_text"], 15, UiKit.JADE, true))
+		var pitch := UiKit.para(d["pitch"], 14)
+		pitch.custom_minimum_size = Vector2(260, 0)
+		cv.add_child(pitch)
+		var h2: String = hid
+		var spacer := Control.new()
+		spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		cv.add_child(spacer)
+		cv.add_child(UiKit.button("率领%s" % d["name"], func(): _close_modal(); _start(false, h2, _difficulty)))
+		row.add_child(card)
+	v.add_child(row)
+	v.move_child(row, v.get_child_count() - 2)
+	var dr := HBoxContainer.new()
+	dr.add_child(UiKit.label("难度", 16, UiKit.INK, true))
+	var od := OptionButton.new()
+	for t in ["轻松：对手经商稍弱", "标准", "困难：对手经商更精明"]:
+		od.add_item(t)
+	od.select(_difficulty)
+	od.item_selected.connect(func(i): _difficulty = i)
+	dr.add_child(od)
+	v.add_child(dr)
+	v.move_child(dr, v.get_child_count() - 2)
+
+
 func _show_help() -> void:
 	_modal("怎么玩", "", [
 		"· 低买高卖：每个港口有两种特产（便宜）和两种需求（昂贵）。同一条路线跑多了，价格会被你自己压平，要不断寻找新路线。",
 		"· 时间：空格暂停，1/2/3 切换速度。旗舰抵港时自动暂停。",
 		"· 扩张：赚到钱后在船坞买船，给新船设自动航线，让它替你跑商。",
-		"· 灯塔：把指定物资运回母港千旗市，再支付金币开工。三层全部建成即胜利。",
+		"· 灯塔：把指定物资运回母港，再支付金币开工。三层全部建成即胜利。",
 		"· 失败：金币为负超过 30 天会破产；对手先点亮灯冠，或第 10 年冬天风暴来临时没有建完，也都算失败。",
 	], [["明白了", func(): _close_modal()]])
 
 
 # =================================================================== game start
 
-func _start(load_save: bool) -> void:
+func _start(load_save: bool, house_id: String = "lamp", difficulty: int = 1) -> void:
 	sim = Sim.new()
 	if load_save:
 		var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
 		if f == null or not sim.from_json(f.get_as_text()):
-			sim.new_game()
+			sim.new_game(0, house_id, difficulty)
 	else:
-		sim.new_game()
+		sim.new_game(0, house_id, difficulty)
 	sim.message.connect(_toast)
 	sim.game_over.connect(func(_r): _show_end())
 	_build_game()
 	_game_on = true
 	_last_day = sim.s["day"]
 	_flag_docked = sim.docked(sim.flagship())
-	_open_port(sim.flagship()["port"] if _flag_docked else GameData.HOUSES[GameData.PLAYER]["home"])
+	_open_port(sim.flagship()["port"] if _flag_docked else GameData.HOUSES[sim.pid()]["home"])
 	speed_idx = 0 if not load_save else 1
 	_refresh_speed()
 	if not load_save:
-		_modal("灯油行会 · 第 1 年 春", "story_letter", [
-			"你是灯油行会的当家霍照野。行会只剩一艘货艇「飞云号」和 12,000 金。",
-			"十年后初风暴将至。白塔议士与铁誓舰团都在抢建灯塔，谁先点亮灯冠，谁就是云海盟主。",
-			"先从一笔小生意开始：在千旗市买入特产丝云绸，运到需要它的港口卖掉。",
+		var me: Dictionary = GameData.HOUSES[sim.pid()]
+		var rivals := []
+		for hid in GameData.HOUSE_IDS:
+			if hid != sim.pid():
+				rivals.append(GameData.HOUSES[hid]["name"])
+		var tg := _tutorial_goal()
+		_modal("%s · 第 1 年 春" % me["name"], "story_letter", [
+			"你是%s的当家%s。商会只剩一艘货艇「飞云号」和 12,000 金。特长：%s。" % [me["name"], me["leader"], me["perk_text"]],
+			"十年后初风暴将至。%s与%s都在抢建灯塔，谁先点亮灯冠，谁就是云海盟主。" % rivals,
+			"先从一笔小生意开始：在%s买入特产%s，运到需要它的%s卖掉。" % [GameData.port_name(me["home"]), GameData.good_name(tg["good"]), GameData.port_name(tg["dest"])],
 		], [["起航", func(): _close_modal()]])
 	_update_tutorial()
 
@@ -229,8 +298,8 @@ func _build_topbar() -> void:
 	var h := HBoxContainer.new()
 	h.add_theme_constant_override("separation", 18)
 	bar.add_child(h)
-	h.add_child(UiKit.icon(UiKit.sprite("emblems", 0), 40))
-	h.add_child(UiKit.label("灯油行会", 22, Color("f3e3b3"), true))
+	h.add_child(UiKit.icon(UiKit.sprite("emblems", GameData.HOUSES[sim.pid()]["emblem"]), 40))
+	h.add_child(UiKit.label(GameData.HOUSES[sim.pid()]["name"], 22, Color("f3e3b3"), true))
 	var gold_box := HBoxContainer.new()
 	gold_box.add_theme_constant_override("separation", 6)
 	gold_box.add_child(UiKit.icon(UiKit.sprite("resources", 2), 30))
@@ -265,7 +334,7 @@ func _build_topbar() -> void:
 		sb.add_child(b)
 		speed_btns.append(b)
 	h.add_child(sb)
-	h.add_child(UiKit.button("灯塔", func(): _open_port(GameData.HOUSES[GameData.PLAYER]["home"], 4), true))
+	h.add_child(UiKit.button("灯塔", func(): _open_port(GameData.HOUSES[sim.pid()]["home"], 4), true))
 	h.add_child(UiKit.button("账簿", _show_ledger, true))
 	h.add_child(UiKit.button("菜单", _show_menu, true))
 
@@ -518,12 +587,12 @@ func _refresh_side() -> void:
 	tabs.add_theme_constant_override("separation", 4)
 	var names := ["交易", "船坞", "产业", "酒馆·银行", "灯塔"]
 	for i in names.size():
-		if i == 4 and _port != GameData.HOUSES[GameData.PLAYER]["home"]:
+		if i == 4 and _port != GameData.HOUSES[sim.pid()]["home"]:
 			continue
 		var b := UiKit.button(names[i], func(): _tab = i; _refresh_side(), i != _tab)
 		tabs.add_child(b)
 	side_body.add_child(tabs)
-	if _tab == 4 and _port != GameData.HOUSES[GameData.PLAYER]["home"]:
+	if _tab == 4 and _port != GameData.HOUSES[sim.pid()]["home"]:
 		_tab = 0
 	match _tab:
 		0: _tab_trade(here)
@@ -633,7 +702,7 @@ func _tab_trade(here: bool) -> void:
 				btns.add_child(b)
 		grid.add_child(btns)
 	side_body.add_child(grid)
-	if here and _port == GameData.HOUSES[GameData.PLAYER]["home"] and sim.house()["lh"]["stage"] < 3:
+	if here and _port == GameData.HOUSES[sim.pid()]["home"] and sim.house()["lh"]["stage"] < 3:
 		side_body.add_child(UiKit.button("把货舱里的灯塔物资交给工地", func(): _act(sim.deliver_mats(fl["id"])), true))
 
 
@@ -660,12 +729,12 @@ func _tab_yard(here: bool) -> void:
 		var v := VBoxContainer.new()
 		v.add_theme_constant_override("separation", 0)
 		v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		v.add_child(UiKit.label("%s  ·  %s 金" % [d["name"], UiKit.money(d["price"])], 17, UiKit.INK, true))
+		v.add_child(UiKit.label("%s  ·  %s 金" % [d["name"], UiKit.money(sim.ship_price(t))], 17, UiKit.INK, true))
 		v.add_child(UiKit.label("货舱 %d · 航速 %.2f · 燃晶 %d/天 · 月薪 %d" % [d["cargo"], d["speed"], d["fuel_day"] * GameData.FUEL_PRICE, d["wage"]], 13, UiKit.MUTED))
 		row.add_child(v)
 		var tt: String = t
 		var b := UiKit.button("购买", func(): _act(sim.buy_ship(tt, _port)); _refresh_fleet())
-		b.disabled = sim.house()["gold"] < d["price"] or sim.ships_of().size() >= GameData.MAX_SHIPS
+		b.disabled = sim.house()["gold"] < sim.ship_price(t) or sim.ships_of().size() >= GameData.MAX_SHIPS
 		row.add_child(b)
 		side_body.add_child(row)
 	var mine := sim.ships_of().filter(func(x): return sim.docked(x) and x["port"] == _port and not x["flagship"])
@@ -684,16 +753,16 @@ func _tab_yard(here: bool) -> void:
 func _tab_industry() -> void:
 	var p: Dictionary = GameData.PORTS[_port]
 	var w: Dictionary = sim.s["ports"][_port]["workshops"]
-	var lvl: int = int(w.get(GameData.PLAYER, 0))
+	var lvl: int = int(w.get(sim.pid(), 0))
 	side_body.add_child(UiKit.label("工坊 · 当前 %d 级" % lvl, 18, UiKit.INK, true))
 	side_body.add_child(UiKit.para("投资工坊会让本港特产（%s、%s）增产、价格更低，每月分红，你在这里买货也更便宜（每级 −2.5%%）。" % [GameData.good_name(p["make"][0]), GameData.good_name(p["make"][1])], 14, UiKit.MUTED))
 	if lvl < 3:
-		var cost: int = GameData.WORKSHOP_COST[lvl]
-		var b := UiKit.button("升到 %d 级 · %s 金 · 月分红 %d" % [lvl + 1, UiKit.money(cost), GameData.WORKSHOP_DIVIDEND[lvl]], func(): _act(sim.invest(_port)))
+		var cost: int = sim.workshop_cost(lvl)
+		var b := UiKit.button("升到 %d 级 · %s 金 · 月分红 %d" % [lvl + 1, UiKit.money(cost), int(sim.dividend(lvl, sim.pid()))], func(): _act(sim.invest(_port)))
 		b.disabled = sim.house()["gold"] < cost
 		side_body.add_child(b)
 	for hid in GameData.HOUSE_IDS:
-		if hid != GameData.PLAYER and int(w.get(hid, 0)) > 0:
+		if hid != sim.pid() and int(w.get(hid, 0)) > 0:
 			side_body.add_child(UiKit.label("%s 在此有 %d 级工坊" % [GameData.HOUSES[hid]["name"], int(w[hid])], 14, UiKit.MUTED))
 
 
@@ -759,7 +828,7 @@ func _tab_lighthouse() -> void:
 	side_body.add_child(HSeparator.new())
 	side_body.add_child(UiKit.label("对手进度", 16, UiKit.INK, true))
 	for hid in GameData.HOUSE_IDS:
-		if hid == GameData.PLAYER:
+		if hid == sim.pid():
 			continue
 		var rl: Dictionary = sim.house(hid)["lh"]
 		var txt := "%s：%d/3 层%s" % [GameData.HOUSES[hid]["name"], rl["stage"], "（施工中）" if rl["building"] else ""]
@@ -815,7 +884,7 @@ func _toast(text: String, kind: String = "info") -> void:
 		return
 	if kind == "bad":
 		sfx("bad")
-	elif "落成" in text and "灯油行会" in text:
+	elif "落成" in text and GameData.HOUSES[sim.pid()]["name"] in text:
 		sfx("gong")
 	if kind == "month":
 		return
@@ -981,13 +1050,15 @@ func _show_ledger() -> void:
 		"累计成交 %d 笔 · 累计利润 %s · 最佳单笔 %s" % [sim.s["stats"]["trades"], UiKit.money(sim.s["stats"]["profit"]), UiKit.money(sim.s["stats"]["best_trade"])],
 	]
 	for hid in GameData.HOUSE_IDS:
-		if hid != GameData.PLAYER:
+		if hid != sim.pid():
 			lines.append("%s：%d 艘船 · 灯塔 %d/3%s" % [GameData.HOUSES[hid]["name"], sim.ships_of(hid).size(), sim.house(hid)["lh"]["stage"], " · 已破产" if sim.house(hid)["bankrupt"] else ""])
 	_modal("账簿", "", lines, [["关闭", func(): _close_modal()]])
 
 
 func _show_menu() -> void:
+	var music: AudioStreamPlayer = get_node("Music")
 	_modal("菜单", "", ["游戏每月自动存档。"], [
+		["音乐：" + ("开" if music.playing else "关"), func(): (music.stop() if music.playing else music.play()); _close_modal(), true],
 		["保存", func(): _save(); _toast("已保存。", "good"); _close_modal(), true],
 		["回到标题", func(): _save(); _close_modal(); _show_title(), true],
 		["继续", func(): _close_modal()],
@@ -1018,12 +1089,22 @@ func _save() -> void:
 
 # =================================================================== tutorial
 
+func _tutorial_goal() -> Dictionary:
+	var home: String = GameData.HOUSES[sim.pid()]["home"]
+	var good: String = GameData.PORTS[home]["make"][0]
+	var dest := ""
+	for pid in GameData.PORT_IDS:
+		if good in GameData.PORTS[pid]["want"] and (dest == "" or GameData.distance(home, pid) < GameData.distance(home, dest)):
+			dest = pid
+	return {"home": home, "good": good, "dest": dest}
+
+
 func _update_tutorial() -> void:
 	if tut_panel == null:
 		return
 	var step: int = sim.s["tutorial"]
 	var fl := sim.flagship()
-	var home: String = GameData.HOUSES[GameData.PLAYER]["home"]
+	var home: String = GameData.HOUSES[sim.pid()]["home"]
 	# advance
 	var advanced := true
 	while advanced:
@@ -1050,20 +1131,27 @@ func _update_tutorial() -> void:
 	sim.s["tutorial"] = step
 	map.highlight_port = ""
 	var text := ""
+	var tg := _tutorial_goal()
+	var gname := GameData.good_name(tg["good"])
+	var dname := GameData.port_name(tg["dest"])
+	var st0: Dictionary = GameData.LIGHTHOUSE[0]
+	var mats := []
+	for g in st0["mats"]:
+		mats.append("%s %d" % [GameData.good_name(g), st0["mats"][g]])
 	match step:
 		0:
-			text = "① 在千旗市的「交易」页，给丝云绸点「买满」。绿色的「产」表示本港特产，价格便宜。"
+			text = "①在%s的「交易」页，给%s点「买满」。绿色的「产」表示本港特产，价格便宜。" % [GameData.port_name(home), gname]
 		1:
-			text = "② 点击地图上闪光的暮霞港，再点「旗舰起航」。暮霞港需要丝云绸，会出高价。"
-			map.highlight_port = "muxia"
+			text = "②点击地图上闪光的%s，再点「旗舰起航」。%s需要%s，会出高价。" % [dname, dname, gname]
+			map.highlight_port = tg["dest"]
 		2:
-			text = "③ 抵港后点「卖光」。看看「最佳去处」一列：它按你知道的行情告诉你每种货运到哪里最赚。" if sim.docked(fl) else "③ 航行中……右上角可以加速。抵港时会自动暂停。"
+			text = "③抵港后点「卖光」。「最佳去处」一列按你知道的行情，告诉你每种货运到哪里最赚。" if sim.docked(fl) else "③航行中……右上角可以加速，抵港时会自动暂停。把鼠标移到港口上可以看到航程和卖价。"
 		3:
-			text = "④ 继续跑商攒钱。金币够了就去任意港口的「船坞」买第二艘船（货艇 12,000 金）。"
+			text = "④继续跑商攒钱。金币够了就去任意港口的「船坞」买第二艘船。"
 		4:
-			text = "⑤ 在左下角船队里点新船的「航线」，让它自己往返跑一条赚钱的路线。"
+			text = "⑤在左下角船队里点新船的「航线」，让它自己往返跑一条赚钱的路线。"
 		5:
-			text = "⑥ 灯塔第一层需要精钢件 80、云麻 120 和 40,000 金。把物资运回千旗市，在「灯塔」页交付并开工。"
+			text = "⑥灯塔第一层需要%s和 %s 金。把物资运回%s，在「灯塔」页交付并开工。" % ["、".join(mats), UiKit.money(st0["gold"]), GameData.port_name(home)]
 			map.highlight_port = home if sim.mats_ready() else ""
 		_:
 			text = ""

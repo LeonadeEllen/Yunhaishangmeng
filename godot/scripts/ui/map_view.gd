@@ -97,7 +97,7 @@ func _draw() -> void:
 		return
 	# routes of player ships
 	var fl := sim.flagship()
-	for sh in sim.ships_of(GameData.PLAYER):
+	for sh in sim.ships_of(sim.pid()):
 		if not sim.docked(sh):
 			var a := to_screen(GameData.PORTS[sh["from"]]["pos"])
 			var b := to_screen(GameData.PORTS[sh["to"]]["pos"])
@@ -127,7 +127,7 @@ func _draw() -> void:
 	for sh in sim.s["ships"]:
 		var sp := to_screen(sim.ship_pos(sh))
 		var tex2: Texture2D = _ship_tex[sh["type"]]
-		var w2 := (84.0 if sh["owner"] == GameData.PLAYER else 64.0) * sc
+		var w2 := (84.0 if sh["owner"] == sim.pid() else 64.0) * sc
 		var h2 := w2 * tex2.get_height() / tex2.get_width()
 		var off := Vector2.ZERO
 		if sim.docked(sh):
@@ -139,7 +139,7 @@ func _draw() -> void:
 		draw_set_transform(r2.get_center() + Vector2(0, h2 * 0.75), 0.0, Vector2(1.0, 0.28))
 		draw_circle(Vector2.ZERO, w2 * 0.4, Color(0.1, 0.2, 0.25, 0.16))
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-		if sh["owner"] != GameData.PLAYER:
+		if sh["owner"] != sim.pid():
 			draw_texture_rect(tex2, r2, false, Color(0.82, 0.86, 0.92, 0.95))
 			draw_circle(r2.position + Vector2(r2.size.x * 0.5, -3), 4.5 * maxf(sc, 0.8), GameData.HOUSES[sh["owner"]]["color"])
 		else:

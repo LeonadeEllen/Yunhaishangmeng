@@ -19,12 +19,18 @@ const STORY := [
 		{"label": "只抄下账本里的行情", "effects": {"story": 2, "intel": true, "say": "账本上的价格虽旧，却足够你规划下一程。"}},
 	 ]},
 	{"id": "story_3", "day": 420, "art": "story_loyalty", "title": "重逢与航图 · 终章",
-	 "text": "陆青带着自己的商会找到你：她愿意把父亲的老主顾全部介绍给灯油行会，只求灯塔点亮时，第一束光照向风月坞。",
+	 "text": "陆青带着自己的商会找到你：她愿意把父亲的老主顾全部介绍给你的商会，只求灯塔点亮时，第一束光照向风月坞。",
 	 "choices": [
 		{"label": "立约：灯塔为风月坞而亮", "effects": {"gold": 6000, "story": 3, "stock": ["fengyue", "steel", 60], "say": "风月坞的工匠们为你开了库房。"}},
 		{"label": "婉拒，各走各路", "effects": {"gold": 2000, "story": 3, "say": "陆青留下一笔谢礼，转身驶入云海。"}},
 	 ]},
 ]
+
+const PIRATES := {"id": "pirates", "title": "云盗拦路", "art": "events/00", "text": "一艘涂黑帆的快艇从云层里钻出来，挂起了云盗的旗子：交钱，或者丢货。",
+	"choices": [
+		{"label": "交过路费（金币的 8%，至少 300）", "effects": {"toll": 0.08, "say": "云盗收了钱，大笑着钻回云里。"}},
+		{"label": "甩开他们", "effects": {"lose_cargo": 0.2, "say": "飞艇冲进乱流甩掉了追兵，但货舱被打破，丢了两成货。"}},
+	]}
 
 const RANDOM := [
 	{"id": "whales", "title": "云鲸迁徙", "art": "events/03", "text": "一群云鲸横穿航道，带起的上升气流把飞艇托得老高。",
@@ -60,6 +66,28 @@ const RANDOM := [
 	 ]},
 	{"id": "councilor", "title": "议员的请托", "art": "events/11", "text": "一位议员请你为他的庄园捎去一批云麦，报酬丰厚。",
 	 "choices": [{"label": "答应", "effects": {"gold": 900, "say": "议员的管家付了钱。"}}]},
+	{"id": "envoy", "title": "密使来访", "art": "events/06", "text": "一位蒙面密使带来对手商会工地的内应名单，开价一千。",
+	 "choices": [
+		{"label": "买下（−1,000 金，领先对手工期 +30 天）", "effects": {"gold": -1000, "rival_delay": 30, "say": "对手的工地接连出了岔子。"}},
+		{"label": "拒之门外", "effects": {"say": "你不屑于这种手段。"}},
+	 ]},
+	{"id": "refugees", "title": "投奔者", "art": "events/08", "text": "一群失了家园的浮民想上船做工，他们说自己会采珠。",
+	 "choices": [
+		{"label": "收留他们（−400 金）", "effects": {"gold": -400, "good": ["pearl", 6], "say": "浮民们用采来的雾珍珠报答你。"}},
+		{"label": "爱莫能助", "effects": {}},
+	 ]},
+	{"id": "oldmap", "title": "古地图", "art": "events/13", "text": "旧货摊上有一张标着气流的古航图，摊主要价六百。",
+	 "choices": [
+		{"label": "买下（−600 金）", "effects": {"gold": -600, "intel": true, "say": "古图上的气流帮你算准了每个港口的行情。"}},
+		{"label": "算了", "effects": {}},
+	 ]},
+	{"id": "auction", "title": "码头拍卖", "art": "events/14", "text": "一位破产商人在码头拍卖存货：二十盏琉璃灯，起价一千五。",
+	 "choices": [
+		{"label": "出价（−1,500 金）", "effects": {"gold": -1500, "good": ["lamp", 20], "say": "你拍下了整箱琉璃灯。"}},
+		{"label": "旁观", "effects": {}},
+	 ]},
+	{"id": "festival", "title": "灯会", "art": "events/15", "text": "港口正逢灯会，烟火与飞艇把夜空照得通亮，市民抢购甜霞果和丝云绸。",
+	 "choices": [{"label": "凑个热闹", "effects": {"festival": true, "say": "这个港口的甜霞果和丝云绸暂时供不应求。"}}]},
 	{"id": "artisan", "title": "灯塔匠人", "art": "events/12", "text": "一位年迈的灯塔匠人愿意为你的工地出谋划策，只要一笔路费。",
 	 "choices": [
 		{"label": "资助他（−800 金）", "effects": {"gold": -800, "good": ["steel", 10], "say": "老匠人带来了十件精钢件作为见面礼。"}},
@@ -76,6 +104,11 @@ static func maybe_trigger(sim: Sim) -> void:
 	if story < STORY.size() and int(s["day"]) >= int(STORY[story]["day"]):
 		_open(sim, STORY[story])
 		return
+	if s.has("sailed"):
+		s.erase("sailed")
+		if int(s["day"]) > 60 and sim.rng.randf() < 0.07 and sim.cargo_used(sim.flagship()) > 0:
+			_open(sim, PIRATES)
+			return
 	if s.has("arrived"):
 		s.erase("arrived")
 		if sim.rng.randf() < 0.14:
@@ -88,7 +121,7 @@ static func _open(sim: Sim, ev: Dictionary) -> void:
 
 
 static func _find(id: String) -> Dictionary:
-	for e in STORY + RANDOM:
+	for e in STORY + RANDOM + [PIRATES]:
 		if e["id"] == id:
 			return e
 	return {}
@@ -126,6 +159,24 @@ static func resolve(sim: Sim, choice: int) -> Dictionary:
 	if fx.has("stock"):
 		var m: Dictionary = sim.s["ports"][fx["stock"][0]]["market"][fx["stock"][1]]
 		m["stock"] = maxf(1.0, m["stock"] + float(fx["stock"][2]))
+	if fx.has("toll"):
+		h["gold"] -= maxf(300.0, maxf(0.0, h["gold"]) * float(fx["toll"]))
+	if fx.has("rival_delay"):
+		var lead := ""
+		for hid in GameData.HOUSE_IDS:
+			if hid != sim.pid() and not sim.house(hid)["bankrupt"]:
+				if lead == "" or sim.house(hid)["lh"]["stage"] > sim.house(lead)["lh"]["stage"]:
+					lead = hid
+		if lead != "":
+			var lh: Dictionary = sim.house(lead)["lh"]
+			if lh["building"]:
+				lh["end"] = int(lh["end"]) + int(fx["rival_delay"])
+			else:
+				sim.house(lead)["gold"] -= 3000.0
+	if fx.has("festival") and not fl.is_empty() and sim.docked(fl):
+		for g in ["fruit", "silk"]:
+			var mk: Dictionary = sim.s["ports"][fl["port"]]["market"][g]
+			mk["stock"] = maxf(1.0, mk["stock"] * 0.4)
 	if fx.has("story"):
 		sim.s["story"] = int(fx["story"])
 	if fx.has("say"):

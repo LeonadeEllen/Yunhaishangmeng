@@ -38,11 +38,11 @@ func run_until_over(sim: Sim, bot: bool, log_every: int = 0) -> void:
 		if sim.s["event"] != null:
 			EventBook.resolve(sim, 0)
 		if bot:
-			for sh in sim.ships_of(GameData.PLAYER):
+			for sh in sim.ships_of(sim.pid()):
 				if sim.docked(sh):
 					AiPlayer.ship_turn(sim, sh)
 			if sim.s["day"] % GameData.DAYS_MONTH == 1:
-				AiPlayer.monthly(sim, GameData.PLAYER)
+				AiPlayer.monthly(sim, sim.pid())
 		sim.advance_day()
 		guard += 1
 		if log_every > 0 and sim.s["day"] % log_every == 0:

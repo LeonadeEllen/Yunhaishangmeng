@@ -14,7 +14,11 @@ func run(m: Control) -> void:
 	await tree_entered
 	await _wait(0.6)
 	await _shot("01_title")
-	main._start(false)
+	main._pick_house()
+	await _wait(0.4)
+	await _shot("01b_pick_house")
+	main._close_modal()
+	main._start(false, "lamp")
 	await _wait(0.5)
 	await _shot("02_intro")
 	main._close_modal()

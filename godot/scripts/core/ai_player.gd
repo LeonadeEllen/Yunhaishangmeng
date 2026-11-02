@@ -105,9 +105,9 @@ static func _best_plan(sim: Sim, sh: Dictionary, needs: Dictionary) -> Dictionar
 				var value: float
 				if needs.has(g) and dest == home:
 					var n := mini(int(q["qty"]), int(needs[g]))
-					value = n * float(GameData.GOODS[g]["base"]) * mat_w + sim.quote_sell(dest, g, int(q["qty"]) - n)["revenue"]
+					value = n * float(GameData.GOODS[g]["base"]) * mat_w + sim.quote_sell(dest, g, int(q["qty"]) - n, hid)["revenue"]
 				else:
-					value = sim.quote_sell(dest, g, q["qty"])["revenue"]
+					value = sim.quote_sell(dest, g, q["qty"], hid)["revenue"]
 				var days := GameData.travel_days(port, dest, sh["type"])
 				var profit: float = value - q["cost"] - sim.fuel_cost(sh["type"], port, dest)
 				var rate := profit / float(days + 1)
@@ -146,12 +146,12 @@ static func monthly(sim: Sim, hid: String) -> void:
 		var next_cost: float = GameData.LIGHTHOUSE[lh["stage"]]["gold"]
 		var home: String = GameData.HOUSES[hid]["home"]
 		var wl: int = int(sim.s["ports"][home]["workshops"].get(hid, 0))
-		if wl < 3 and h["gold"] > next_cost + GameData.WORKSHOP_COST[wl] + WORKING_CAPITAL:
+		if wl < 3 and h["gold"] > next_cost + sim.workshop_cost(wl, hid) + WORKING_CAPITAL:
 			sim.invest(home, hid)
 	# Keep enough for the next lighthouse stage before expanding.
 	if ships.size() < 3 and h["gold"] > 26000 + 15000:
 		var home: String = GameData.HOUSES[hid]["home"]
-		h["gold"] -= GameData.SHIPS["galleon"]["price"]
+		h["gold"] -= sim.ship_price("galleon", hid)
 		sim._add_ship(hid, "galleon", home)
 	# cash crunch: sell an idle, empty ship rather than spiral into debt
 	var upkeep := float(h.get("last_upkeep", 0.0))

@@ -18,7 +18,15 @@ var rng := RandomNumberGenerator.new()
 
 # ---------------------------------------------------------------- setup
 
-func new_game(seed_value: int = 0) -> void:
+func pid() -> String:
+	return s.get("player", "lamp")
+
+
+func perk(hid: String) -> String:
+	return GameData.HOUSES[hid].get("perk", "")
+
+
+func new_game(seed_value: int = 0, player: String = "lamp", difficulty: int = 1) -> void:
 	if seed_value == 0:
 		seed_value = int(Time.get_unix_time_from_system())
 	rng.seed = seed_value
@@ -26,7 +34,7 @@ func new_game(seed_value: int = 0) -> void:
 		"seed": seed_value, "day": 0, "over": null, "next_ship_id": 1,
 		"ports": {}, "houses": {}, "ships": [], "intel": {}, "log": [],
 		"event": null, "story": 0, "stats": {"trades": 0, "profit": 0, "best_trade": 0},
-		"tutorial": 0,
+		"tutorial": 0, "player": player, "fashion": null, "difficulty": difficulty,
 	}
 	for pid in GameData.PORT_IDS:
 		var p: Dictionary = GameData.PORTS[pid]
@@ -37,6 +45,8 @@ func new_game(seed_value: int = 0) -> void:
 				eq = NEUTRAL_EQ * MAKE_EQ
 			elif g in p["want"]:
 				eq = NEUTRAL_EQ * WANT_EQ
+			if g in p["make"] or g in p["want"]:
+				eq *= rng.randf_range(0.8, 1.25)   # every run has its own strong and weak routes
 			m[g] = {"stock": eq * rng.randf_range(0.85, 1.15), "eq": eq}
 		s["ports"][pid] = {"market": m, "workshops": {}}
 	for hid in GameData.HOUSE_IDS:
@@ -46,10 +56,10 @@ func new_game(seed_value: int = 0) -> void:
 			"lh": {"stage": 0, "building": false, "end": 0, "mats": {}},
 			"month_in": 0.0, "month_out": 0.0, "last_net": 0.0,
 		}
-		_add_ship(hid, "freighter", h["home"], "飞云号" if hid == GameData.PLAYER else "")
+		_add_ship(hid, "freighter", h["home"], "飞云号" if hid == pid() else "")
 	for pid in GameData.PORT_IDS:
 		s["intel"][pid] = null
-	_update_intel(GameData.HOUSES[GameData.PLAYER]["home"])
+	_update_intel(GameData.HOUSES[pid()]["home"])
 
 
 func _add_ship(hid: String, type: String, port: String, ship_name: String = "") -> Dictionary:
@@ -60,7 +70,7 @@ func _add_ship(hid: String, type: String, port: String, ship_name: String = "") 
 	var sh := {
 		"id": id, "owner": hid, "type": type, "name": ship_name, "port": port,
 		"from": port, "to": "", "depart": 0, "arrive": 0, "cargo": {}, "route": null,
-		"flagship": hid == GameData.PLAYER and _ships_of(hid).is_empty(),
+		"flagship": hid == pid() and _ships_of(hid).is_empty(),
 	}
 	s["ships"].append(sh)
 	return sh
@@ -68,7 +78,9 @@ func _add_ship(hid: String, type: String, port: String, ship_name: String = "") 
 
 # ---------------------------------------------------------------- queries
 
-func house(hid: String = GameData.PLAYER) -> Dictionary:
+func house(hid: String = "") -> Dictionary:
+	if hid == "":
+		hid = pid()
 	return s["houses"][hid]
 
 
@@ -83,15 +95,17 @@ func _ships_of(hid: String) -> Array:
 	return s["ships"].filter(func(x): return x["owner"] == hid)
 
 
-func ships_of(hid: String = GameData.PLAYER) -> Array:
+func ships_of(hid: String = "") -> Array:
+	if hid == "":
+		hid = pid()
 	return _ships_of(hid)
 
 
 func flagship() -> Dictionary:
-	for sh in _ships_of(GameData.PLAYER):
+	for sh in _ships_of(pid()):
 		if sh["flagship"]:
 			return sh
-	var all := _ships_of(GameData.PLAYER)
+	var all := _ships_of(pid())
 	return all[0] if not all.is_empty() else {}
 
 
@@ -124,16 +138,32 @@ func _discount(hid: String, port: String) -> float:
 	return 1.0 - 0.025 * lvl
 
 
-func buy_price(port: String, good: String, hid: String = GameData.PLAYER) -> int:
+func buy_price(port: String, good: String, hid: String = "") -> int:
+	if hid == "":
+		hid = pid()
 	return int(roundf(unit_price(port, good) * 1.06 * _discount(hid, port)))
 
 
-func sell_price(port: String, good: String) -> int:
-	return int(roundf(unit_price(port, good) * 0.94))
+const AI_BONUS := [0.98, 1.025, 1.06]   # rivals' selling edge per difficulty (easy / normal / hard)
+
+
+func _sell_mult(hid: String) -> float:
+	var m := 0.94 * (1.05 if perk(hid) == "sell" else 1.0)
+	if hid != pid():
+		m *= AI_BONUS[clampi(int(s.get("difficulty", 1)), 0, 2)]
+	return m
+
+
+func sell_price(port: String, good: String, hid: String = "") -> int:
+	if hid == "":
+		hid = pid()
+	return int(roundf(unit_price(port, good) * _sell_mult(hid)))
 
 
 ## Quote buying `qty` units: price climbs as stock drops. Returns {qty, cost}.
-func quote_buy(port: String, good: String, qty: int, hid: String = GameData.PLAYER, budget: float = INF) -> Dictionary:
+func quote_buy(port: String, good: String, qty: int, hid: String = "", budget: float = INF) -> Dictionary:
+	if hid == "":
+		hid = pid()
 	var st: float = s["ports"][port]["market"][good]["stock"]
 	var cost := 0.0
 	var n := 0
@@ -148,11 +178,14 @@ func quote_buy(port: String, good: String, qty: int, hid: String = GameData.PLAY
 	return {"qty": n, "cost": int(cost)}
 
 
-func quote_sell(port: String, good: String, qty: int) -> Dictionary:
+func quote_sell(port: String, good: String, qty: int, hid: String = "") -> Dictionary:
+	if hid == "":
+		hid = pid()
+	var mult := _sell_mult(hid)
 	var st: float = s["ports"][port]["market"][good]["stock"]
 	var rev := 0.0
 	for i in qty:
-		rev += roundf(unit_price(port, good, st) * 0.94)
+		rev += roundf(unit_price(port, good, st) * mult)
 		st += 1.0
 	return {"qty": qty, "revenue": int(rev)}
 
@@ -161,7 +194,9 @@ func fuel_cost(type: String, from: String, to: String) -> int:
 	return GameData.travel_days(from, to, type) * int(GameData.SHIPS[type]["fuel_day"]) * GameData.FUEL_PRICE
 
 
-func net_worth(hid: String = GameData.PLAYER) -> float:
+func net_worth(hid: String = "") -> float:
+	if hid == "":
+		hid = pid()
 	var h := house(hid)
 	var v: float = h["gold"] - h["debt"]
 	for sh in _ships_of(hid):
@@ -175,7 +210,9 @@ func net_worth(hid: String = GameData.PLAYER) -> float:
 	return v
 
 
-func loan_limit(hid: String = GameData.PLAYER) -> float:
+func loan_limit(hid: String = "") -> float:
+	if hid == "":
+		hid = pid()
 	return maxf(10000.0, net_worth(hid) * 0.5 + house(hid)["debt"])
 
 
@@ -210,7 +247,7 @@ func buy(ship_id: int, good: String, qty: int) -> Dictionary:
 	c["qty"] = int(c["qty"]) + int(q["qty"])
 	c["cost"] = total / float(c["qty"])
 	sh["cargo"][good] = c
-	if sh["owner"] == GameData.PLAYER:
+	if sh["owner"] == pid():
 		_update_intel(sh["port"])
 	return {"ok": true, "msg": "买入 %s ×%d，花费 %d 金。" % [GameData.good_name(good), q["qty"], q["cost"]], "qty": q["qty"], "cost": q["cost"]}
 
@@ -225,7 +262,7 @@ func sell(ship_id: int, good: String, qty: int) -> Dictionary:
 	qty = mini(qty, int(c["qty"]))
 	if qty <= 0:
 		return _fail("数量无效。")
-	var q := quote_sell(sh["port"], good, qty)
+	var q := quote_sell(sh["port"], good, qty, sh["owner"])
 	var h := house(sh["owner"])
 	h["gold"] += q["revenue"]
 	h["month_in"] += q["revenue"]
@@ -234,7 +271,7 @@ func sell(ship_id: int, good: String, qty: int) -> Dictionary:
 	c["qty"] = int(c["qty"]) - qty
 	if c["qty"] <= 0:
 		sh["cargo"].erase(good)
-	if sh["owner"] == GameData.PLAYER:
+	if sh["owner"] == pid():
 		s["stats"]["trades"] += 1
 		s["stats"]["profit"] += profit
 		s["stats"]["best_trade"] = maxi(int(s["stats"]["best_trade"]), profit)
@@ -259,27 +296,45 @@ func depart(ship_id: int, dest: String) -> Dictionary:
 	sh["depart"] = s["day"]
 	sh["arrive"] = s["day"] + GameData.travel_days(sh["port"], dest, sh["type"])
 	sh["port"] = ""
+	if sh["owner"] == pid() and sh["flagship"]:
+		s["sailed"] = true
 	return {"ok": true, "msg": "%s 起航前往 %s，预计 %d 天，燃晶 %d 金。" % [sh["name"], GameData.port_name(dest), sh["arrive"] - sh["depart"], fc]}
 
 
 func buy_ship(type: String, port: String) -> Dictionary:
 	var h := house()
-	if _ships_of(GameData.PLAYER).size() >= GameData.MAX_SHIPS:
+	if _ships_of(pid()).size() >= GameData.MAX_SHIPS:
 		return _fail("船队最多 %d 艘。" % GameData.MAX_SHIPS)
-	var price: int = GameData.SHIPS[type]["price"]
+	var price: int = ship_price(type)
 	if h["gold"] < price:
 		return _fail("需要 %d 金。" % price)
 	h["gold"] -= price
 	h["month_out"] += price
-	var sh := _add_ship(GameData.PLAYER, type, port)
+	var sh := _add_ship(pid(), type, port)
 	return {"ok": true, "msg": "购得 %s「%s」。" % [GameData.SHIPS[type]["name"], sh["name"]], "ship": sh["id"]}
+
+
+func ship_price(type: String, hid: String = "") -> int:
+	if hid == "":
+		hid = pid()
+	return int(GameData.SHIPS[type]["price"] * (0.8 if perk(hid) == "ships" else 1.0))
+
+
+func workshop_cost(lvl: int, hid: String = "") -> int:
+	if hid == "":
+		hid = pid()
+	return int(GameData.WORKSHOP_COST[lvl] * (0.75 if perk(hid) == "industry" else 1.0))
+
+
+func dividend(lvl: int, hid: String) -> float:
+	return GameData.WORKSHOP_DIVIDEND[lvl] * (1.25 if perk(hid) == "industry" else 1.0)
 
 
 func sell_ship(ship_id: int) -> Dictionary:
 	var sh := ship(ship_id)
-	if sh.is_empty() or sh["owner"] != GameData.PLAYER or not docked(sh):
+	if sh.is_empty() or sh["owner"] != pid() or not docked(sh):
 		return _fail("只能出售停在港口的飞艇。")
-	if _ships_of(GameData.PLAYER).size() <= 1:
+	if _ships_of(pid()).size() <= 1:
 		return _fail("至少保留一艘飞艇。")
 	if not sh["cargo"].is_empty():
 		return _fail("请先清空货舱。")
@@ -288,14 +343,14 @@ func sell_ship(ship_id: int) -> Dictionary:
 	var was_flag: bool = sh["flagship"]
 	s["ships"].erase(sh)
 	if was_flag:
-		_ships_of(GameData.PLAYER)[0]["flagship"] = true
+		_ships_of(pid())[0]["flagship"] = true
 	return {"ok": true, "msg": "出售 %s，回收 %d 金。" % [sh["name"], v]}
 
 
 ## Auto route: buy `good` at `a`, sell at `b`, loop. Empty dict clears it.
 func set_route(ship_id: int, route: Dictionary) -> Dictionary:
 	var sh := ship(ship_id)
-	if sh.is_empty() or sh["owner"] != GameData.PLAYER:
+	if sh.is_empty() or sh["owner"] != pid():
 		return _fail("无效飞艇。")
 	if sh["flagship"] and not route.is_empty():
 		return _fail("旗舰由你亲自指挥，不能设自动航线。")
@@ -322,12 +377,14 @@ func repay(amount: int) -> Dictionary:
 	return {"ok": true, "msg": "还款 %d 金。" % amount}
 
 
-func invest(port: String, hid: String = GameData.PLAYER) -> Dictionary:
+func invest(port: String, hid: String = "") -> Dictionary:
+	if hid == "":
+		hid = pid()
 	var w: Dictionary = s["ports"][port]["workshops"]
 	var lvl: int = int(w.get(hid, 0))
 	if lvl >= 3:
 		return _fail("工坊已是最高级。")
-	var cost: int = GameData.WORKSHOP_COST[lvl]
+	var cost: int = workshop_cost(lvl, hid)
 	var h := house(hid)
 	if h["gold"] < cost:
 		return _fail("需要 %d 金。" % cost)
@@ -337,7 +394,7 @@ func invest(port: String, hid: String = GameData.PLAYER) -> Dictionary:
 	var make: Array = GameData.PORTS[port]["make"]
 	for g in make:
 		s["ports"][port]["market"][g]["eq"] += NEUTRAL_EQ * 0.25
-	return {"ok": true, "msg": "%s 工坊升到 %d 级：特产增产，每月分红 %d 金。" % [GameData.port_name(port), lvl + 1, GameData.WORKSHOP_DIVIDEND[lvl]]}
+	return {"ok": true, "msg": "%s 工坊升到 %d 级：特产增产，每月分红 %d 金。" % [GameData.port_name(port), lvl + 1, int(dividend(lvl, hid))]}
 
 
 ## Deliver cargo from a docked ship at the house's home port toward the current lighthouse stage.
@@ -368,7 +425,9 @@ func deliver_mats(ship_id: int) -> Dictionary:
 	return {"ok": true, "msg": "交付 " + "、".join(parts) + "。"}
 
 
-func mats_ready(hid: String = GameData.PLAYER) -> bool:
+func mats_ready(hid: String = "") -> bool:
+	if hid == "":
+		hid = pid()
 	var lh: Dictionary = house(hid)["lh"]
 	if lh["stage"] >= GameData.LIGHTHOUSE.size():
 		return false
@@ -379,7 +438,9 @@ func mats_ready(hid: String = GameData.PLAYER) -> bool:
 	return true
 
 
-func start_lighthouse(hid: String = GameData.PLAYER) -> Dictionary:
+func start_lighthouse(hid: String = "") -> Dictionary:
+	if hid == "":
+		hid = pid()
 	var h := house(hid)
 	var lh: Dictionary = h["lh"]
 	if lh["building"] or lh["stage"] >= GameData.LIGHTHOUSE.size():
@@ -393,7 +454,7 @@ func start_lighthouse(hid: String = GameData.PLAYER) -> Dictionary:
 	h["month_out"] += st["gold"]
 	lh["building"] = true
 	lh["end"] = s["day"] + int(st["days"])
-	if hid != GameData.PLAYER:
+	if hid != pid():
 		_say("%s 开始建造灯塔%s（第 %d 层）。" % [GameData.HOUSES[hid]["name"], st["name"], int(lh["stage"]) + 1], "major")
 	return {"ok": true, "msg": "灯塔%s开工，%d 天后完工。" % [st["name"], st["days"]]}
 
@@ -444,6 +505,7 @@ func advance_day() -> void:
 	s["day"] += 1
 	var day: int = s["day"]
 	_tick_markets()
+	_tick_fashion()
 	_tick_ships()
 	_tick_lighthouses()
 	if day % GameData.DAYS_MONTH == 0:
@@ -462,6 +524,24 @@ func _tick_markets() -> void:
 			e["stock"] = maxf(0.0, e["stock"] + (e["eq"] - e["stock"]) * REVERT)
 
 
+func _tick_fashion() -> void:
+	var f = s.get("fashion")
+	if f != null:
+		if int(s["day"]) >= int(f["end"]):
+			s["ports"][f["port"]]["market"][f["good"]]["eq"] = float(f["eq"])
+			_say("风尚退潮：%s 的%s价格回落。" % [GameData.port_name(f["port"]), GameData.good_name(f["good"])], "info")
+			s["fashion"] = null
+		return
+	if int(s["day"]) > 45 and rng.randf() < 1.0 / 75.0:
+		var port: String = GameData.PORT_IDS[rng.randi() % GameData.PORT_IDS.size()]
+		var options: Array = GameData.GOOD_IDS.filter(func(g): return not g in GameData.PORTS[port]["make"])
+		var good: String = options[rng.randi() % options.size()]
+		var m: Dictionary = s["ports"][port]["market"][good]
+		s["fashion"] = {"port": port, "good": good, "eq": m["eq"], "end": int(s["day"]) + 60}
+		m["eq"] = m["eq"] * 0.35
+		_say("风尚：%s 突然追捧%s，未来两个月价格会大涨。" % [GameData.port_name(port), GameData.good_name(good)], "major")
+
+
 func _tick_ships() -> void:
 	for sh in s["ships"].duplicate():
 		if not docked(sh) and s["day"] >= sh["arrive"]:
@@ -469,14 +549,14 @@ func _tick_ships() -> void:
 			sh["to"] = ""
 			_on_arrive(sh)
 		elif docked(sh):
-			if sh["owner"] == GameData.PLAYER and sh["route"] != null:
+			if sh["owner"] == pid() and sh["route"] != null:
 				_run_route(sh)
-			elif sh["owner"] != GameData.PLAYER:
+			elif sh["owner"] != pid():
 				AiPlayer.ship_turn(self, sh)
 
 
 func _on_arrive(sh: Dictionary) -> void:
-	if sh["owner"] == GameData.PLAYER:
+	if sh["owner"] == pid():
 		_update_intel(sh["port"])
 		if sh["route"] != null:
 			_run_route(sh)
@@ -531,9 +611,9 @@ func _tick_lighthouses() -> void:
 			lh["stage"] += 1
 			lh["mats"] = {}
 			var who: String = GameData.HOUSES[hid]["name"]
-			_say("%s 的灯塔%s落成（%d/3）。" % [who, st["name"], lh["stage"]], "good" if hid == GameData.PLAYER else "major")
+			_say("%s 的灯塔%s落成（%d/3）。" % [who, st["name"], lh["stage"]], "good" if hid == pid() else "major")
 			if lh["stage"] >= GameData.LIGHTHOUSE.size():
-				_end("first_light" if hid == GameData.PLAYER else "rival_light", hid)
+				_end("first_light" if hid == pid() else "rival_light", hid)
 				return
 
 
@@ -550,7 +630,7 @@ func _monthly() -> void:
 		for pid in GameData.PORT_IDS:
 			var lvl: int = int(s["ports"][pid]["workshops"].get(hid, 0))
 			if lvl > 0:
-				div += GameData.WORKSHOP_DIVIDEND[lvl - 1]
+				div += dividend(lvl - 1, hid)
 		h["gold"] += div - cost - interest
 		h["month_in"] += div
 		h["month_out"] += cost + interest
@@ -558,11 +638,11 @@ func _monthly() -> void:
 		h["last_upkeep"] = cost + interest
 		h["month_in"] = 0.0
 		h["month_out"] = 0.0
-		if hid != GameData.PLAYER:
+		if hid != pid():
 			AiPlayer.monthly(self, hid)
 		else:
 			_say("月结：上月净收支 %+d 金（固定开支 %d）。" % [int(h["last_net"]), int(cost + interest)], "month")
-		if hid == GameData.PLAYER and h["gold"] < 0.0:
+		if hid == pid() and h["gold"] < 0.0:
 			# automatic emergency loan before a crisis starts
 			var room: float = loan_limit() - h["debt"]
 			var need: float = -h["gold"] + 500.0
@@ -578,7 +658,7 @@ func _tick_crisis() -> void:
 		if h["bankrupt"]:
 			continue
 		if h["gold"] < 0.0:
-			if h["crisis"] == 0 and hid == GameData.PLAYER:
+			if h["crisis"] == 0 and hid == pid():
 				_say("债务危机：%d 天内金币必须转正，否则商会破产！" % GameData.CRISIS_DAYS, "bad")
 			h["crisis"] += 1
 			if h["crisis"] >= GameData.CRISIS_DAYS:
@@ -590,7 +670,7 @@ func _tick_crisis() -> void:
 func _bankrupt(hid: String) -> void:
 	var h: Dictionary = s["houses"][hid]
 	h["bankrupt"] = true
-	if hid == GameData.PLAYER:
+	if hid == pid():
 		_end("bankrupt", hid)
 		return
 	_say("%s 宣告破产，退出云海。" % GameData.HOUSES[hid]["name"], "major")
@@ -601,15 +681,15 @@ func _bankrupt(hid: String) -> void:
 
 func _storm_ending() -> void:
 	var st: int = house()["lh"]["stage"]
-	_end("long_night" if st == 0 else "partial", GameData.PLAYER)
+	_end("long_night" if st == 0 else "partial", pid())
 
 
 const ENDINGS := {
-	"first_light": {"title": "灯冠先亮", "win": true, "text": "初风暴压境之前，你的灯塔第一个点亮了灯冠。云海诸港奉灯油行会为盟主。"},
-	"partial": {"title": "残灯守夜", "win": false, "text": "风暴来临时你的灯塔尚未完工，残缺的灯火只照亮了千旗市周围的航道。"},
-	"long_night": {"title": "长夜", "win": false, "text": "大风暴降临，没有一座灯塔为你而亮。灯油行会在黑暗中解散。"},
-	"rival_light": {"title": "他人之灯", "win": false, "text": "对手先一步点亮灯冠，云海诸港改奉他人为盟主。"},
-	"bankrupt": {"title": "破产", "win": false, "text": "债主收走了最后一艘飞艇。灯油行会的旗帜从千旗市降下。"},
+	"first_light": {"title": "灯冠先亮", "win": true, "text": "初风暴压境之前，你的灯塔第一个点亮了灯冠。云海诸港奉{house}为盟主。"},
+	"partial": {"title": "残灯守夜", "win": false, "text": "风暴来临时你的灯塔尚未完工，残缺的灯火只照亮了{home}周围的航道。"},
+	"long_night": {"title": "长夜", "win": false, "text": "大风暴降临，没有一座灯塔为你而亮。{house}在黑暗中解散。"},
+	"rival_light": {"title": "他人之灯", "win": false, "text": "{winner}先一步点亮灯冠，云海诸港改奉他们为盟主。"},
+	"bankrupt": {"title": "破产", "win": false, "text": "债主收走了最后一艘飞艇。{house}的旗帜从{home}降下。"},
 }
 
 
@@ -620,7 +700,9 @@ func _end(kind: String, hid: String) -> void:
 	var score := int(net_worth() / 100.0) + int(house()["lh"]["stage"]) * 500 + int(s["story"]) * 150
 	if e["win"]:
 		score += 1000 + maxi(0, GameData.END_DAY - int(s["day"]))
-	s["over"] = {"kind": kind, "title": e["title"], "text": e["text"], "win": e["win"], "by": hid, "day": s["day"], "score": score}
+	var me: Dictionary = GameData.HOUSES[pid()]
+	var text: String = e["text"].format({"house": me["name"], "home": GameData.port_name(me["home"]), "winner": GameData.HOUSES[hid]["name"]})
+	s["over"] = {"kind": kind, "title": e["title"], "text": text, "win": e["win"], "by": hid, "day": s["day"], "score": score}
 	_say("结局 · " + e["title"], "major")
 	game_over.emit(s["over"])
 
