@@ -1,0 +1,212 @@
+extends Control
+## The cloud-sea map: islands, routes, drifting clouds and moving airships.
+## Logical map space is 1600 x 1000 (GameData port positions); it is fitted into this control.
+
+signal port_clicked(port_id: String)
+signal port_hovered(port_id: String)
+
+const MAP_SIZE := Vector2(1600, 1000)
+const ISLAND_W := 128.0
+
+var sim: Sim
+var selected_port := ""
+var hover_port := ""
+var highlight_port := ""      # tutorial hint target
+var _clouds := []
+var _t := 0.0
+var _island_tex := {}
+var _ship_tex := {}
+
+
+func _ready() -> void:
+	mouse_filter = Control.MOUSE_FILTER_STOP
+	var r := RandomNumberGenerator.new()
+	r.seed = 4242
+	for i in 46:
+		_clouds.append({"p": Vector2(r.randf_range(-100, 1700), r.randf_range(-60, 1060)),
+			"r": r.randf_range(40, 140), "v": r.randf_range(3, 10), "a": r.randf_range(0.18, 0.45)})
+	for pid in GameData.PORT_IDS:
+		_island_tex[pid] = UiKit.sprite("map_islands", GameData.PORTS[pid]["island"])
+	for t in GameData.SHIPS:
+		_ship_tex[t] = UiKit.sprite("ships", GameData.SHIPS[t]["sprite"])
+
+
+const VIEW := Rect2(250, 50, 1220, 1050)   # ports bounding box + margins, in map space
+
+
+func _scale() -> float:
+	return minf(size.x / VIEW.size.x, size.y / VIEW.size.y)
+
+
+func _offset() -> Vector2:
+	return (size - VIEW.size * _scale()) * 0.5 - VIEW.position * _scale()
+
+
+func to_screen(p: Vector2) -> Vector2:
+	return _offset() + p * _scale()
+
+
+func to_map(p: Vector2) -> Vector2:
+	return (p - _offset()) / _scale()
+
+
+func _process(delta: float) -> void:
+	_t += delta
+	for c in _clouds:
+		c["p"].x += c["v"] * delta
+		if c["p"].x > 1760:
+			c["p"].x = -160
+	queue_redraw()
+
+
+func _port_at(screen_pos: Vector2) -> String:
+	var mp := to_map(screen_pos)
+	for pid in GameData.PORT_IDS:
+		if mp.distance_to(GameData.PORTS[pid]["pos"]) < ISLAND_W * 0.5:
+			return pid
+	return ""
+
+
+func _gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseMotion:
+		var p := _port_at(event.position)
+		if p != hover_port:
+			hover_port = p
+			mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if p != "" else Control.CURSOR_ARROW
+			port_hovered.emit(p)
+	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		var p := _port_at(event.position)
+		if p != "":
+			port_clicked.emit(p)
+			accept_event()
+
+
+func _draw() -> void:
+	var sc := _scale()
+	# sky
+	draw_rect(Rect2(Vector2.ZERO, size), Color("cfe0e3"))
+	# soft paper vignette
+	for i in 6:
+		var inset := float(i) * 18.0
+		draw_rect(Rect2(Vector2(inset, inset), size - Vector2(inset, inset) * 2.0), Color(0.86, 0.91, 0.91, 0.08), false, 18.0)
+	# far clouds
+	for c in _clouds:
+		if c["r"] > 90:
+			_cloud(c, sc)
+	if sim == null:
+		return
+	# routes of player ships
+	var fl := sim.flagship()
+	for sh in sim.ships_of(GameData.PLAYER):
+		if not sim.docked(sh):
+			var a := to_screen(GameData.PORTS[sh["from"]]["pos"])
+			var b := to_screen(GameData.PORTS[sh["to"]]["pos"])
+			_dashed(a, b, Color(UiKit.BRASS, 0.85) if sh["id"] == fl.get("id", -1) else Color(UiKit.JADE, 0.55), 3.0 * sc + 1.0)
+		elif sh["route"] != null:
+			var a2 := to_screen(GameData.PORTS[sh["route"]["a"]]["pos"])
+			var b2 := to_screen(GameData.PORTS[sh["route"]["b"]]["pos"])
+			_dashed(a2, b2, Color(UiKit.JADE, 0.35), 2.0)
+	# hover route preview from flagship
+	if not fl.is_empty() and sim.docked(fl) and hover_port != "" and hover_port != fl["port"]:
+		_dashed(to_screen(GameData.PORTS[fl["port"]]["pos"]), to_screen(GameData.PORTS[hover_port]["pos"]), Color(UiKit.BRASS, 0.9), 3.0)
+	# islands
+	var font := UiKit.font_bold if UiKit.font_bold else ThemeDB.fallback_font
+	for pid in GameData.PORT_IDS:
+		var p := to_screen(GameData.PORTS[pid]["pos"])
+		var tex: Texture2D = _island_tex[pid]
+		var w := ISLAND_W * sc
+		var bob := sin(_t * 0.8 + p.x * 0.01) * 3.0 * sc
+		var h := w * tex.get_height() / tex.get_width()
+		if pid == highlight_port:
+			var pulse := 0.5 + 0.5 * sin(_t * 4.0)
+			draw_circle(p + Vector2(0, bob), w * (0.58 + 0.06 * pulse), Color(UiKit.BRASS, 0.25 + 0.2 * pulse))
+		if pid == selected_port or pid == hover_port:
+			draw_circle(p + Vector2(0, bob), w * 0.55, Color(1, 1, 1, 0.35))
+		draw_texture_rect(tex, Rect2(p - Vector2(w, h) * 0.5 + Vector2(0, bob), Vector2(w, h)), false)
+	# ships
+	for sh in sim.s["ships"]:
+		var sp := to_screen(sim.ship_pos(sh))
+		var tex2: Texture2D = _ship_tex[sh["type"]]
+		var w2 := (84.0 if sh["owner"] == GameData.PLAYER else 64.0) * sc
+		var h2 := w2 * tex2.get_height() / tex2.get_width()
+		var off := Vector2.ZERO
+		if sim.docked(sh):
+			# fan out docked ships around the island
+			var idx := _dock_slot(sh)
+			off = Vector2(ISLAND_W * 0.62 * (1 if idx % 2 == 0 else -1), -10.0 + 34.0 * (idx / 2)) * sc
+		var bob2 := sin(_t * 2.0 + float(sh["id"])) * 2.5 * sc
+		var r2 := Rect2(sp + off - Vector2(w2, h2) * 0.5 + Vector2(0, bob2 - 18.0 * sc), Vector2(w2, h2))
+		draw_set_transform(r2.get_center() + Vector2(0, h2 * 0.75), 0.0, Vector2(1.0, 0.28))
+		draw_circle(Vector2.ZERO, w2 * 0.4, Color(0.1, 0.2, 0.25, 0.16))
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		if sh["owner"] != GameData.PLAYER:
+			draw_texture_rect(tex2, r2, false, Color(0.82, 0.86, 0.92, 0.95))
+			draw_circle(r2.position + Vector2(r2.size.x * 0.5, -3), 4.5 * maxf(sc, 0.8), GameData.HOUSES[sh["owner"]]["color"])
+		else:
+			if sh.get("flagship", false):
+				draw_circle(r2.get_center(), w2 * 0.62, Color(UiKit.BRASS, 0.22))
+			draw_texture_rect(tex2, r2, false)
+	# port name plates on top of ships
+	for pid in GameData.PORT_IDS:
+		var p := to_screen(GameData.PORTS[pid]["pos"])
+		var tex: Texture2D = _island_tex[pid]
+		var w := ISLAND_W * sc
+		var bob := sin(_t * 0.8 + p.x * 0.01) * 3.0 * sc
+		var h := w * tex.get_height() / tex.get_width()
+		var home_of := ""
+		for hid in GameData.HOUSE_IDS:
+			if GameData.HOUSES[hid]["home"] == pid:
+				home_of = hid
+		var name: String = GameData.PORTS[pid]["name"]
+		var fs := int(maxf(13.0, 20.0 * sc))
+		var tw := font.get_string_size(name, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		var lp := p + Vector2(-tw * 0.5, h * 0.5 + fs + 2 + bob)
+		var plate := Rect2(lp + Vector2(-8, -fs - 2), Vector2(tw + 16, fs + 10))
+		draw_style_box(UiKit.box(Color(UiKit.PARCH, 0.92), Color(UiKit.BRASS, 0.7), 4, 1, 0), plate)
+		draw_string(font, lp, name, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, UiKit.INK)
+		if home_of != "":
+			var col: Color = GameData.HOUSES[home_of]["color"]
+			draw_circle(plate.position + Vector2(plate.size.x + 2, plate.size.y * 0.5), 6.0 * maxf(sc, 0.8), col)
+	# near clouds over everything
+	for c in _clouds:
+		if c["r"] <= 90:
+			_cloud(c, sc)
+
+
+func _dock_slot(sh: Dictionary) -> int:
+	# stable slot among the ships docked at the same port
+	var n := 0
+	for o in sim.s["ships"]:
+		if o["id"] == sh["id"]:
+			return n
+		if sim.docked(o) and o["port"] == sh["port"]:
+			n += 1
+	return n
+
+
+func _cloud(c: Dictionary, sc: float) -> void:
+	# flat paper cloud: stacked lobes with a slightly darker cut edge underneath
+	var p := to_screen(c["p"])
+	var r: float = c["r"] * sc
+	var a: float = c["a"]
+	var lobes := [Vector2(0, 0), Vector2(r * 0.85, r * 0.12), Vector2(-r * 0.8, r * 0.16), Vector2(r * 0.35, -r * 0.35)]
+	var radii := [r * 0.62, r * 0.48, r * 0.44, r * 0.42]
+	draw_set_transform(p + Vector2(0, r * 0.12), 0.0, Vector2(1.0, 0.55))
+	for i in lobes.size():
+		draw_circle(lobes[i] + Vector2(0, r * 0.08), radii[i], Color(0.62, 0.72, 0.76, a * 0.35))
+	for i in lobes.size():
+		draw_circle(lobes[i], radii[i], Color(1, 1, 1, a))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+func _dashed(a: Vector2, b: Vector2, col: Color, w: float) -> void:
+	var d := a.distance_to(b)
+	if d < 1.0:
+		return
+	var dir := (b - a) / d
+	var step := 14.0
+	var phase := fmod(_t * 18.0, step)
+	var x := phase
+	while x < d:
+		draw_line(a + dir * x, a + dir * minf(x + step * 0.55, d), col, w, true)
+		x += step
