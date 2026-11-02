@@ -31,7 +31,7 @@ func _ready() -> void:
 		_ship_tex[t] = UiKit.sprite("ships", GameData.SHIPS[t]["sprite"])
 
 
-const VIEW := Rect2(250, 50, 1220, 1050)   # ports bounding box + margins, in map space
+const VIEW := Rect2(200, -40, 1320, 1180)   # ports bounding box + margins, in map space
 
 
 func _scale() -> float:

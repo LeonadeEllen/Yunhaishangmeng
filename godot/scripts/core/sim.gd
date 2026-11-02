@@ -393,6 +393,8 @@ func start_lighthouse(hid: String = GameData.PLAYER) -> Dictionary:
 	h["month_out"] += st["gold"]
 	lh["building"] = true
 	lh["end"] = s["day"] + int(st["days"])
+	if hid != GameData.PLAYER:
+		_say("%s 开始建造灯塔%s（第 %d 层）。" % [GameData.HOUSES[hid]["name"], st["name"], int(lh["stage"]) + 1], "major")
 	return {"ok": true, "msg": "灯塔%s开工，%d 天后完工。" % [st["name"], st["days"]]}
 
 
@@ -408,6 +410,11 @@ func buy_intel() -> Dictionary:
 
 
 func _update_intel(port: String) -> void:
+	var old = s["intel"].get(port)
+	if old != null and int(old["day"]) != int(s["day"]):
+		if not s.has("intel_prev"):
+			s["intel_prev"] = {}
+		s["intel_prev"][port] = old
 	var prices := {}
 	for g in GameData.GOOD_IDS:
 		prices[g] = [buy_price(port, g), sell_price(port, g)]
@@ -553,7 +560,9 @@ func _monthly() -> void:
 		h["month_out"] = 0.0
 		if hid != GameData.PLAYER:
 			AiPlayer.monthly(self, hid)
-		elif h["gold"] < 0.0:
+		else:
+			_say("月结：上月净收支 %+d 金（固定开支 %d）。" % [int(h["last_net"]), int(cost + interest)], "month")
+		if hid == GameData.PLAYER and h["gold"] < 0.0:
 			# automatic emergency loan before a crisis starts
 			var room: float = loan_limit() - h["debt"]
 			var need: float = -h["gold"] + 500.0

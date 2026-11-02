@@ -68,6 +68,23 @@ func run(m: Control) -> void:
 	await _wait(0.3)
 	await _shot("14_ledger")
 	main._close_modal()
+	# hover card
+	main._on_port_hovered("chishi")
+	await _wait(0.3)
+	await _shot("14b_hover")
+	main._on_port_hovered("")
+	# mid game: auto route + 150 fast days
+	var sh2: Dictionary = main.sim.ships_of()[main.sim.ships_of().size() - 1]
+	main.sim.set_route(sh2["id"], {"a": "qianqi", "b": "chishi", "good": "silk"})
+	for i in 150:
+		if main.sim.s["event"] != null:
+			EventBook.resolve(main.sim, 0)
+		main.sim.advance_day()
+	main.sim.s["frac"] = 0.3
+	main._refresh_all()
+	main._open_port(main.sim.flagship()["port"], 0)
+	await _wait(0.5)
+	await _shot("14c_midgame")
 	main.sim.s["over"] = null
 	main.sim._end("first_light", "lamp")
 	await _wait(0.4)

@@ -33,22 +33,50 @@ var tut_panel: PanelContainer
 var tut_label: Label
 var crisis_label: Label
 var modal_layer: Control
+var hover_card: PanelContainer
+var _sfx := {}
+var _sfx_players := []
 
 
 func _ready() -> void:
 	theme = UiKit.build_theme()
 	RenderingServer.set_default_clear_color(Color("cfe0e3"))
+	for n in ["coin", "click", "sail", "bell", "gong", "bad", "page"]:
+		_sfx[n] = load("res://assets/sfx/%s.wav" % n)
+	for i in 4:
+		var ap := AudioStreamPlayer.new()
+		ap.volume_db = -8.0
+		add_child(ap)
+		_sfx_players.append(ap)
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	_show_title()
 	if OS.get_environment("YUNHAI_SHOTS") != "":
 		load("res://tests/shot_runner.gd").new().run(self)
 
 
+func sfx(name: String) -> void:
+	if not _sfx.has(name):
+		return
+	for ap in _sfx_players:
+		if not ap.playing:
+			ap.stream = _sfx[name]
+			ap.play()
+			return
+
+
 # =================================================================== title
+
+func _clear_ui() -> void:
+	for c in get_children():
+		if c in _sfx_players:
+			continue
+		remove_child(c)
+		c.queue_free()
+
 
 func _show_title() -> void:
 	_game_on = false
-	UiKit.clear(self)
+	_clear_ui()
 	var bg := TextureRect.new()
 	bg.texture = UiKit.scene_art("title")
 	bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
@@ -123,13 +151,14 @@ func _start(load_save: bool) -> void:
 
 
 func _build_game() -> void:
-	UiKit.clear(self)
+	_clear_ui()
 	map = MapView.new()
 	map.sim = sim
 	map.set_anchors_preset(Control.PRESET_FULL_RECT)
 	map.offset_top = 64
 	map.offset_right = -572
 	map.port_clicked.connect(_on_port_clicked)
+	map.port_hovered.connect(_on_port_hovered)
 	add_child(map)
 	_build_topbar()
 	# side panel
@@ -161,7 +190,7 @@ func _build_game() -> void:
 	tut_panel = PanelContainer.new()
 	tut_panel.add_theme_stylebox_override("panel", UiKit.box(Color(UiKit.INK, 0.92), UiKit.BRASS, 6, 1, 12))
 	tut_panel.custom_minimum_size = Vector2(440, 0)
-	tut_panel.resized.connect(func(): tut_panel.position = Vector2(size.x - 572 - 12 - tut_panel.size.x, size.y - tut_panel.size.y - 12))
+	tut_panel.position = Vector2(16, 78)
 	add_child(tut_panel)
 	tut_label = UiKit.para("", 16, Color("f6efdc"))
 	tut_label.custom_minimum_size = Vector2(410, 0)
@@ -179,6 +208,11 @@ func _build_game() -> void:
 	toast_box.position = Vector2(size.x - 572 - 412, 78)
 	toast_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(toast_box)
+	hover_card = PanelContainer.new()
+	hover_card.add_theme_stylebox_override("panel", UiKit.box(Color("fffaf0"), UiKit.BRASS, 6, 1, 10))
+	hover_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hover_card.visible = false
+	add_child(hover_card)
 	modal_layer = Control.new()
 	modal_layer.set_anchors_preset(Control.PRESET_FULL_RECT)
 	modal_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -261,11 +295,13 @@ func _after_day() -> bool:
 	var fl := sim.flagship()
 	var now_docked := not fl.is_empty() and sim.docked(fl)
 	if now_docked and not _flag_docked:
+		sfx("bell")
 		_set_speed(0)
 		_open_port(fl["port"], 0)
 		stop = true
 	_flag_docked = now_docked
 	if sim.s["event"] != null:
+		sfx("page")
 		_show_event()
 		stop = true
 	if sim.s["day"] % GameData.DAYS_MONTH == 0:
@@ -390,6 +426,41 @@ func _refresh_fleet() -> void:
 
 
 # =================================================================== port panel
+
+func _on_port_hovered(pid: String) -> void:
+	if pid == "" or _modal_open:
+		hover_card.visible = false
+		return
+	UiKit.clear(hover_card)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 3)
+	hover_card.add_child(v)
+	v.add_child(UiKit.label(GameData.port_name(pid), 18, UiKit.INK, true))
+	var fl := sim.flagship()
+	if not fl.is_empty() and sim.docked(fl) and fl["port"] != pid:
+		v.add_child(UiKit.label("旗舰前往：%d 天 · 燃晶 %d 金" % [GameData.travel_days(fl["port"], pid, fl["type"]), sim.fuel_cost(fl["type"], fl["port"], pid)], 14, UiKit.JADE, true))
+	var it = sim.s["intel"][pid]
+	if it == null:
+		v.add_child(UiKit.label("尚无行情", 14, UiKit.MUTED))
+	else:
+		v.add_child(UiKit.label("行情 %d 天前" % (int(sim.s["day"]) - int(it["day"])), 13, UiKit.MUTED))
+		var goods: Array = []
+		if not fl.is_empty():
+			goods = fl["cargo"].keys()
+		for g in GameData.PORTS[pid]["want"]:
+			if not g in goods:
+				goods.append(g)
+		for g in goods:
+			var line := "%s 卖 %d" % [GameData.good_name(g), int(it["prices"][g][1])]
+			if not fl.is_empty() and fl["cargo"].has(g):
+				var m := int(it["prices"][g][1]) - int(fl["cargo"][g]["cost"])
+				line += "（货舱 %d 件，每件 %+d）" % [int(fl["cargo"][g]["qty"]), m]
+			v.add_child(UiKit.label(line, 14, UiKit.INK))
+	hover_card.visible = true
+	hover_card.reset_size()
+	var mp := get_local_mouse_position() + Vector2(18, 18)
+	hover_card.position = Vector2(minf(mp.x, size.x - 572 - hover_card.size.x - 8), minf(mp.y, size.y - hover_card.size.y - 8))
+
 
 func _on_port_clicked(pid: String) -> void:
 	_open_port(pid, 0 if _port != pid else _tab)
@@ -516,7 +587,19 @@ func _tab_trade(here: bool) -> void:
 		var spr: int = sim.sell_price(_port, g) if here else int(intel["prices"][g][1])
 		var base: float = GameData.GOODS[g]["base"]
 		grid.add_child(UiKit.label(str(bp), 15, UiKit.UP if bp < base * 0.85 else (UiKit.DOWN if bp > base * 1.2 else UiKit.INK), true))
-		grid.add_child(UiKit.label(str(spr), 15, UiKit.UP if spr > base * 1.2 else UiKit.INK, true))
+		var trend := ""
+		var prev = sim.s.get("intel_prev", {}).get(_port)
+		if prev != null:
+			var old_s: int = int(prev["prices"][g][1])
+			if spr > old_s * 1.03:
+				trend = " ▲"
+			elif spr < old_s * 0.97:
+				trend = " ▼"
+		var sl := UiKit.label(str(spr) + trend, 15, UiKit.UP if spr > base * 1.2 else UiKit.INK, true)
+		if trend != "":
+			sl.tooltip_text = "上次到访时卖价 %d" % int(prev["prices"][g][1])
+			sl.mouse_filter = Control.MOUSE_FILTER_PASS
+		grid.add_child(sl)
 		var held := 0
 		var avg := 0.0
 		if here and fl["cargo"].has(g):
@@ -698,6 +781,9 @@ func _trade(is_buy: bool, g: String, qty: int) -> void:
 	var res := sim.buy(fl["id"], g, qty) if is_buy else sim.sell(fl["id"], g, qty)
 	if res["ok"] and not is_buy and int(res["profit"]) > 0:
 		_float_profit(int(res["profit"]))
+		sfx("coin")
+	elif res["ok"]:
+		sfx("click")
 	_act(res)
 
 
@@ -706,6 +792,7 @@ func _sail(dest: String) -> void:
 	var res := sim.depart(fl["id"], dest)
 	_act(res)
 	if res["ok"]:
+		sfx("sail")
 		_flag_docked = false
 		if speed_idx == 0:
 			_set_speed(1)
@@ -725,6 +812,12 @@ func _float_profit(v: int) -> void:
 
 func _toast(text: String, kind: String = "info") -> void:
 	if toast_box == null or text == "":
+		return
+	if kind == "bad":
+		sfx("bad")
+	elif "落成" in text and "灯油行会" in text:
+		sfx("gong")
+	if kind == "month":
 		return
 	var col: Color = {"info": UiKit.INK, "good": UiKit.JADE, "bad": UiKit.TERRA, "major": UiKit.BRASS}.get(kind, UiKit.INK)
 	var p := PanelContainer.new()

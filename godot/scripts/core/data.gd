@@ -35,7 +35,7 @@ const PORTS := {
 	"fengyue":  {"name": "风月坞", "pos": Vector2(660, 300), "island": 1, "make": ["steel", "fiber"],   "want": ["fruit", "incense"], "desc": "锻炉日夜不熄，工匠只认现钱。"},
 	"cuijing":  {"name": "翠鲸岛", "pos": Vector2(1250, 330), "island": 7, "make": ["incense", "fruit"], "want": ["steel", "wheat"],   "desc": "林木蔽天的岛屿，香木在树心里慢慢结成。"},
 	"tonghe":   {"name": "铜鹤矶", "pos": Vector2(1300, 720), "island": 6, "make": ["steel", "canvas"],  "want": ["fish", "pearl"],    "desc": "铜鹤风车守着港口，船坞的号子从不停歇。"},
-	"chishi":   {"name": "赤石矶", "pos": Vector2(780, 830), "island": 0, "make": ["wheat", "incense"], "want": ["silk", "fiber"],    "desc": "赤色岩壁下藏着梯田，收成全靠风向。"},
+	"chishi":   {"name": "赤石矶", "pos": Vector2(850, 830), "island": 0, "make": ["wheat", "incense"], "want": ["silk", "fiber"],    "desc": "赤色岩壁下藏着梯田，收成全靠风向。"},
 }
 const PORT_IDS := ["qianqi", "hongxiao", "muxia", "xiajing", "fengyue", "cuijing", "tonghe", "chishi"]
 

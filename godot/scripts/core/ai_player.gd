@@ -15,6 +15,16 @@ static func ship_turn(sim: Sim, sh: Dictionary) -> void:
 	var home: String = GameData.HOUSES[hid]["home"]
 	if port == home:
 		sim.deliver_mats(sh["id"])
+		# materials made right here: buy and hand them over directly
+		var here_needs := _needs(sim, hid)
+		for g in here_needs:
+			if g in GameData.PORTS[home]["make"]:
+				var free := sim.cargo_cap(sh) - sim.cargo_used(sh)
+				var budget: float = h["gold"] - WORKING_CAPITAL * 0.3
+				var q := sim.quote_buy(home, g, mini(int(here_needs[g]), free), hid, budget)
+				if q["qty"] > 0:
+					sim.buy(sh["id"], g, q["qty"])
+		sim.deliver_mats(sh["id"])
 	# sell everything that is not a needed material on its way home
 	var needs := _needs(sim, hid)
 	for g in sh["cargo"].keys():
@@ -131,6 +141,13 @@ static func monthly(sim: Sim, hid: String) -> void:
 			sim.start_lighthouse(hid)
 			return
 	var ships := sim.ships_of(hid)
+	# rich and between stages: build up industry at home
+	if lh["stage"] >= 1 and lh["stage"] < GameData.LIGHTHOUSE.size():
+		var next_cost: float = GameData.LIGHTHOUSE[lh["stage"]]["gold"]
+		var home: String = GameData.HOUSES[hid]["home"]
+		var wl: int = int(sim.s["ports"][home]["workshops"].get(hid, 0))
+		if wl < 3 and h["gold"] > next_cost + GameData.WORKSHOP_COST[wl] + WORKING_CAPITAL:
+			sim.invest(home, hid)
 	# Keep enough for the next lighthouse stage before expanding.
 	if ships.size() < 3 and h["gold"] > 26000 + 15000:
 		var home: String = GameData.HOUSES[hid]["home"]
