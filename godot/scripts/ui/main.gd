@@ -15,6 +15,8 @@ var _port := ""                  # port shown in the side panel
 var _tab := 0
 var _modal_open := false
 var _difficulty := 1
+var _gold_shown := 0.0
+var _lh_seen := 0
 
 # nodes
 var map: Control
@@ -62,6 +64,20 @@ func _ready() -> void:
 	_show_title()
 	if OS.get_environment("YUNHAI_SHOTS") != "":
 		load("res://tests/shot_runner.gd").new().run(self)
+
+
+## Tutorial highlight: brass outline + gentle pulse on the exact button to press.
+func _pulse(b: Button) -> void:
+	var sb := UiKit.box(Color("f3d58a"), UiKit.BRASS, 5, 3, 8)
+	b.add_theme_stylebox_override("normal", sb)
+	b.add_theme_color_override("font_color", UiKit.INK)
+	var tw := b.create_tween().set_loops()
+	tw.tween_property(b, "modulate", Color(1.15, 1.1, 0.9), 0.5)
+	tw.tween_property(b, "modulate", Color.WHITE, 0.5)
+
+
+func _tut_step() -> int:
+	return int(sim.s["tutorial"]) if sim != null else -1
 
 
 func sfx(name: String) -> void:
@@ -199,6 +215,8 @@ func _start(load_save: bool, house_id: String = "lamp", difficulty: int = 1) -> 
 	sim.game_over.connect(func(_r): _show_end())
 	_build_game()
 	_game_on = true
+	_gold_shown = sim.house()["gold"]
+	_lh_seen = sim.house()["lh"]["stage"]
 	_last_day = sim.s["day"]
 	_flag_docked = sim.docked(sim.flagship())
 	_open_port(sim.flagship()["port"] if _flag_docked else GameData.HOUSES[sim.pid()]["home"])
@@ -369,10 +387,17 @@ func _after_day() -> bool:
 		_open_port(fl["port"], 0)
 		stop = true
 	_flag_docked = now_docked
-	if sim.s["event"] != null:
+	if int(sim.house()["lh"]["stage"]) > _lh_seen:
+		_lh_seen = sim.house()["lh"]["stage"]
+		_lighthouse_cutscene(_lh_seen)
+		stop = true
+	elif sim.s["event"] != null:
 		sfx("page")
 		_show_event()
 		stop = true
+	if sim.s["day"] % 90 == 0 and sim.s["day"] > 0:
+		var season: String = GameData.SEASONS[(int(sim.s["day"]) % 360) / 90]
+		_toast("入%s。距初风暴还有 %d 年 %d 天。" % [season, (GameData.END_DAY - int(sim.s["day"])) / 360, (GameData.END_DAY - int(sim.s["day"])) % 360], "info")
 	if sim.s["day"] % GameData.DAYS_MONTH == 0:
 		_save()
 	if sim.s["day"] != _last_day:
@@ -421,7 +446,13 @@ func _refresh_all() -> void:
 
 func _refresh_top() -> void:
 	var h := sim.house()
-	top_gold.text = UiKit.money(h["gold"])
+	var target: float = h["gold"]
+	if absf(target - _gold_shown) < 2.0:
+		_gold_shown = target
+	else:
+		_gold_shown = lerpf(_gold_shown, target, 0.18)
+	top_gold.text = UiKit.money(_gold_shown)
+	top_gold.add_theme_color_override("font_color", Color("f6efdc") if absf(target - _gold_shown) < 2.0 else (Color("a8dcb8") if target > _gold_shown else Color("f2b8a6")))
 	var net: float = h.get("last_net", 0.0)
 	top_net.text = ("上月 %+s" % UiKit.money(net)) if sim.s["day"] >= 30 else ""
 	top_net.add_theme_color_override("font_color", Color("a8dcb8") if net >= 0 else Color("f2b8a6"))
@@ -488,7 +519,10 @@ func _refresh_fleet() -> void:
 		row.add_child(v)
 		var id: int = sh["id"]
 		if not sh["flagship"]:
-			row.add_child(UiKit.button("航线", func(): _show_route_dialog(id), true))
+			var rb := UiKit.button("航线", func(): _show_route_dialog(id), true)
+			if _tut_step() == 4 and sh["route"] == null:
+				_pulse(rb)
+			row.add_child(rb)
 		elif sim.docked(sh):
 			row.add_child(UiKit.button("查看", func(): _open_port(sh["port"], 0), true))
 		fleet_box.add_child(row)
@@ -579,6 +613,8 @@ func _refresh_side() -> void:
 		var days := GameData.travel_days(fl["port"], _port, fl["type"])
 		var fc := sim.fuel_cost(fl["type"], fl["port"], _port)
 		var go := UiKit.button("旗舰起航前往此港 · %d 天 · 燃晶 %d 金" % [days, fc], func(): _sail(_port))
+		if _tut_step() == 1 and _port == _tutorial_goal()["dest"]:
+			_pulse(go)
 		side_body.add_child(go)
 	elif not fl.is_empty() and not sim.docked(fl):
 		side_body.add_child(UiKit.label("旗舰航行中：前往 %s，剩 %d 天" % [GameData.port_name(fl["to"]), int(fl["arrive"]) - int(sim.s["day"])], 15, UiKit.JADE, true))
@@ -590,6 +626,8 @@ func _refresh_side() -> void:
 		if i == 4 and _port != GameData.HOUSES[sim.pid()]["home"]:
 			continue
 		var b := UiKit.button(names[i], func(): _tab = i; _refresh_side(), i != _tab)
+		if (_tut_step() == 3 and i == 1 and sim.house()["gold"] >= sim.ship_price("freighter") and _tab != 1) or (_tut_step() == 5 and i == 4 and _tab != 4):
+			_pulse(b)
 		tabs.add_child(b)
 	side_body.add_child(tabs)
 	if _tab == 4 and _port != GameData.HOUSES[sim.pid()]["home"]:
@@ -693,6 +731,10 @@ func _tab_trade(here: bool) -> void:
 			var b1 := UiKit.button("买10", func(): _trade(true, gg, 10), true)
 			var b2 := UiKit.button("买满", func(): _trade(true, gg, 9999), true)
 			var b3 := UiKit.button("卖光", func(): _trade(false, gg, 9999), held == 0)
+			if _tut_step() == 0 and gg == _tutorial_goal()["good"]:
+				_pulse(b2)
+			if _tut_step() == 2 and held > 0:
+				_pulse(b3)
 			b1.disabled = sim.cargo_used(fl) >= sim.cargo_cap(fl) or sim.house()["gold"] < bp
 			b2.disabled = b1.disabled
 			b3.disabled = held == 0
@@ -982,6 +1024,27 @@ func _confirm_route(ship_id: int, og: OptionButton, oa: OptionButton, ob: Option
 	_act(sim.set_route(ship_id, {"a": a, "b": b, "good": GameData.GOOD_IDS[og.selected]}))
 	_close_modal()
 	_refresh_fleet()
+
+
+func _lighthouse_cutscene(stage: int) -> void:
+	_set_speed(0)
+	sfx("gong")
+	var st: Dictionary = GameData.LIGHTHOUSE[stage - 1]
+	var v := _modal("灯塔%s落成" % st["name"], "", [
+		"第 %d 层已经立起来了。%s" % [stage, "灯冠点亮之时，你就是云海盟主。" if stage < 3 else "灯冠点亮了！"],
+	], [["继续", func(): _close_modal(); if sim.s["event"] != null: _show_event()]], 520)
+	var holder := CenterContainer.new()
+	holder.custom_minimum_size = Vector2(520, 300)
+	var img := UiKit.icon(UiKit.sprite("lighthouse", st["sprite"]), 280)
+	img.pivot_offset = Vector2(140, 280)
+	img.scale = Vector2(1.0, 0.05)
+	img.modulate.a = 0.0
+	holder.add_child(img)
+	v.add_child(holder)
+	v.move_child(holder, 0)
+	var tw := create_tween()
+	tw.tween_property(img, "modulate:a", 1.0, 0.3)
+	tw.parallel().tween_property(img, "scale", Vector2.ONE, 1.4).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 
 func _show_route_dialog(ship_id: int) -> void:

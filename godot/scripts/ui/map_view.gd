@@ -16,6 +16,7 @@ var _clouds := []
 var _t := 0.0
 var _island_tex := {}
 var _ship_tex := {}
+var _paper: Texture2D
 
 
 func _ready() -> void:
@@ -25,6 +26,7 @@ func _ready() -> void:
 	for i in 46:
 		_clouds.append({"p": Vector2(r.randf_range(-100, 1700), r.randf_range(-60, 1060)),
 			"r": r.randf_range(40, 140), "v": r.randf_range(3, 10), "a": r.randf_range(0.18, 0.45)})
+	_paper = UiKit.scene_art("paper_sea")
 	for pid in GameData.PORT_IDS:
 		_island_tex[pid] = UiKit.sprite("map_islands", GameData.PORTS[pid]["island"])
 	for t in GameData.SHIPS:
@@ -83,8 +85,11 @@ func _gui_input(event: InputEvent) -> void:
 
 func _draw() -> void:
 	var sc := _scale()
-	# sky
-	draw_rect(Rect2(Vector2.ZERO, size), Color("cfe0e3"))
+	# sky: tiled paper texture tinted by season
+	var tint := Color(1, 1, 1)
+	if sim != null:
+		tint = [Color(0.97, 1.0, 0.97), Color(1.0, 0.98, 0.92), Color(1.0, 0.93, 0.85), Color(0.9, 0.94, 1.0)][(int(sim.s["day"]) % 360) / 90]
+	draw_texture_rect(_paper, Rect2(Vector2.ZERO, size), true, tint)
 	# soft paper vignette
 	for i in 6:
 		var inset := float(i) * 18.0
