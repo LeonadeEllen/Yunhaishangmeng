@@ -50,6 +50,7 @@ var tut_panel: PanelContainer
 var tut_label: Label
 var hint_panel: PanelContainer
 var hint_label: Label
+var tut_skip: Button
 var crisis_label: Label
 var modal_layer: Control
 var hover_card: PanelContainer
@@ -94,6 +95,11 @@ func _pulse(b: Button) -> void:
 
 func _tut_step() -> int:
 	return int(sim.s["tutorial"]) if sim != null else -1
+
+
+## A veteran save: the lighthouse is already under way, so the middle steps are moot.
+func _tut_far() -> bool:
+	return int(sim.house()["lh"]["stage"]) > 0 or bool(sim.house()["lh"]["building"])
 
 
 func sfx(name: String) -> void:
@@ -327,9 +333,19 @@ func _build_game() -> void:
 	tut_panel.add_theme_stylebox_override("panel", UiKit.box(Color(UiKit.INK, 0.92), UiKit.BRASS, 6, 1, 12))
 	tut_panel.custom_minimum_size = Vector2(440, 0)
 	left_col.add_child(tut_panel)
+	var tv := VBoxContainer.new()
+	tv.add_theme_constant_override("separation", 4)
+	tut_panel.add_child(tv)
 	tut_label = UiKit.para("", 16, Color("f6efdc"))
 	tut_label.custom_minimum_size = Vector2(410, 0)
-	tut_panel.add_child(tut_label)
+	tv.add_child(tut_label)
+	var trow := HBoxContainer.new()
+	trow.alignment = BoxContainer.ALIGNMENT_END
+	tut_skip = UiKit.button("跳过引导", func(): sim.s["tutorial"] = 9; _update_tutorial(), true)
+	tut_skip.add_theme_font_size_override("font_size", 12)
+	tut_skip.visible = false
+	trow.add_child(tut_skip)
+	tv.add_child(trow)
 	# one-time hints the first time something new shows up (round 20)
 	hint_panel = PanelContainer.new()
 	hint_panel.add_theme_stylebox_override("panel", UiKit.box(Color(UiKit.PARCH, 0.97), UiKit.JADE, 6, 2, 12))
@@ -861,7 +877,7 @@ func _refresh_side() -> void:
 			continue
 		var b := UiKit.button(names[i], func(): _tab = i; _build_plot = -1; _refresh_side(), i != _tab)
 		b.add_theme_font_size_override("font_size", 15)
-		if (_tut_step() == 3 and i == 1 and sim.house()["gold"] >= sim.ship_price("freighter") and _tab != 1) or (_tut_step() == 5 and i == 6 and _tab != 6):
+		if (_tut_step() == 3 and i == 1 and sim.house()["gold"] >= sim.ship_price("freighter") and _tab != 1) or (_tut_step() == 8 and i == 6 and _tab != 6):
 			_pulse(b)
 		tabs.add_child(b)
 	side_body.add_child(tabs)
@@ -2699,8 +2715,17 @@ func _update_tutorial() -> void:
 				if sim.ships_of().any(func(x): return x["route"] != null):
 					step = 5; advanced = true
 			5:
-				if sim.house()["lh"]["stage"] > 0 or sim.house()["lh"]["building"]:
+				if int(sim.s["stats"].get("contracts", 0)) > 0 or _tut_far():
 					step = 6; advanced = true
+			6:
+				if not sim.crew().is_empty() or _tut_far():
+					step = 7; advanced = true
+			7:
+				if not Industry.all_buildings(sim, sim.pid()).is_empty() or _tut_far():
+					step = 8; advanced = true
+			8:
+				if sim.house()["lh"]["stage"] > 0 or sim.house()["lh"]["building"]:
+					step = 9; advanced = true
 	sim.s["tutorial"] = step
 	map.highlight_port = ""
 	var text := ""
@@ -2724,9 +2749,17 @@ func _update_tutorial() -> void:
 		4:
 			text = "⑤在左下角船队里点新船的「航线」，让它自己往返跑一条赚钱的路线。"
 		5:
-			text = "⑥灯塔第一层需要%s和 %s 金。把物资运回%s，在「灯塔」页交付并开工。" % ["、".join(mats), UiKit.money(st0["gold"]), GameData.port_name(home)]
+			text = "⑥各港酒馆的「委托板」会张贴求购单：接下一张，在期限内把货送到，酬金一次拿走，比普通跑商划算。"
+		6:
+			text = "⑦名声到「船东」后，去各城的酒馆、船坞、行会找愿意加入的人。第一位伙伴派到岗位上就有加成，好感高了还有剧情。" if sim.rep_level() < 2 else "⑦去各城的酒馆、船坞、行会看看谁愿意加入：第一位伙伴派到岗位上就有加成，好感高了还有剧情和托付。"
+		7:
+			text = "⑧在友好度够的城，去「商馆」页买下一块地或一份图纸建工坊：货会自己长出来，比买来的便宜得多。"
+		8:
+			text = "⑨灯塔第一层需要%s和 %s 金。把物资运回%s，在「灯塔」页交付并开工。做到这里，你已经会玩了。" % ["、".join(mats), UiKit.money(st0["gold"]), GameData.port_name(home)]
 			map.highlight_port = home if sim.mats_ready() else ""
 		_:
 			text = ""
 	tut_panel.visible = text != ""
 	tut_label.text = text
+	if tut_skip != null:
+		tut_skip.visible = step >= 5
