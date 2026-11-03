@@ -576,6 +576,33 @@ func test_explore() -> void:
 	r = _sail_to(sim, "wreck_c")
 	check(r["ok"] and sim.ships_of(sim.pid()).size() == n0 + 1, "the stranded gunboat joins the fleet (%d -> %d)" % [n0, sim.ships_of(sim.pid()).size()])
 	sim.s["discovery"] = null
+	# a survey boat explores on its own, and can be called back from the fog
+	sim.s["explore"]["found"]["baisha"] = true
+	var sv: Dictionary = sim.buy_ship("survey", sim.flagship()["port"])
+	check(sv["ok"], "a survey boat can be bought in the east")
+	var svs := sim.ship(int(sv["ship"]))
+	var sight0 := sim.sight()
+	check(sight0 > GameData.SIGHT, "a survey boat in the fleet widens the view (%.0f)" % sight0)
+	check(sim.sail_ok(svs, "ruin_garden")["ok"] and sim.depart(int(sv["ship"]), "ruin_garden")["ok"], "the survey boat may go exploring alone")
+	for i in 60:
+		sim.advance_day()
+		if sim.docked(sim.ship(int(sv["ship"]))):
+			break
+	check(sim.spot_found("ruin_garden") and sim.has_bp("balm"), "the survey boat's find counts: the balm secret from the hanging garden")
+	sim.s["discovery"] = null
+	check(sim.depart(int(sv["ship"]), sim.nearest_open_port("ruin_garden"))["ok"], "the survey boat sails back to the nearest charted port")
+	# pirates rob rivals too
+	var rv: Dictionary = sim.ships_of("iron")[0]
+	var rh := sim.house("iron")
+	rh["gold"] = 50000.0
+	rv["port"] = "tonghe"
+	rv["to"] = ""
+	sim._stow(rv, "copper", 20, 40.0)
+	var raid := sim._rival_raid(rv, "qianqi", true)
+	check(raid.has("result") and (raid["result"] != "toll" or rh["gold"] == 50000.0 - raid["gold"]), "a raided rival pays the toll or fights (%s)" % str(raid))
+	rh["gold"] = 100.0
+	var raid2 := sim._rival_raid(rv, "qianqi", true)
+	check(raid2["result"] != "toll", "a broke rival loses cargo instead (%s)" % str(raid2))
 	# save / load keeps the charts
 	var json := sim.to_json()
 	var sim2 := Sim.new()

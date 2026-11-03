@@ -213,9 +213,10 @@ func _show_help() -> void:
 		"· 城镇：旗舰进港后会走进城里。WASD 走动，点建筑进门办事，Esc 回到海图。路人会透露行情。",
 		"· 主角：卖货、航行、委托和建坊都涨经验，升级得能力点，点顶栏的名字分配到航海 / 交易 / 魅力。",
 		"· 航行与空战：季风随季节转向，顺风航程更短。载货航行可能遇上云盗：应战、交过路费或甩开。空战是回合制六角格：炮击、接舷、修补、防御、撤退，主角升级学会指挥战术。酒馆有剿匪悬赏。",
-		"· 探索：名声「商董」后可在任何行会赞助探险队（40,000 金），海图上出现通往东云域的「风隙」。只有旗舰能去雾里的「?」处探索：发现城市、遗迹、漂流物，每个发现都会让周围的雾散开一些。东边的城天然出产西边没人做的加工品，长途跑一趟利润厚，云盗也多一倍。",
+		"· 探索：名声「商董」后可在任何行会赞助探险队（40,000 金），海图上出现通往东云域的「风隙」。旗舰和单独行动的测绘艇能去雾里的「?」处探索（船队里有测绘艇时看得更远）：发现城市、遗迹、漂流物，每个发现都会让周围的雾散开一些。东边的城天然出产西边没人做的加工品，长途跑一趟利润厚，云盗也多一倍。",
 		"· 伙伴：酒馆、船坞、行会里能遇到 12 位各有专长的人物，付安家费招入商会，每月发薪。安排岗位（航海长、账房、炮术长、接舷队长、船长）吃他们的能力加成；一起航行、打赢云盗、送礼都涨好感，好感到了会触发三章个人剧情，走完专长更强。",
 		"· 时间：空格暂停，1/2/3 切换速度。旗舰抵港时自动暂停。",
+		"· 对手：灯油行会靠跑商、铁誓舰团靠船队（船便宜、航速快）、白塔议士靠产业（工坊便宜、产地多产）。云盗对谁都下手，对手的船也会被劫。",
 		"· 灯塔：三层灯塔是云海盟主的象征，不建也可以一直玩下去。金币为负超过 30 天会破产。",
 	], [["明白了", func(): _close_modal()]])
 
@@ -861,20 +862,28 @@ func _spot_panel() -> void:
 	side_body.add_child(head)
 	if here:
 		side_body.add_child(UiKit.label("你的船队停在这里。点海图上的「?」继续探索，或回到任何一座城。", 14, UiKit.JADE, true))
-	elif not fl.is_empty() and sim.docked(fl):
-		var ok := sim.sail_ok(fl, _spot)
-		var days := sim.ship_days(fl, _spot)
-		var fc := sim.fuel_cost_for(fl, _spot)
-		var go := UiKit.button(("旗舰前往探索 · %d 天 · 补给 %d 金" if not found else "旗舰前往此处 · %d 天 · 补给 %d 金") % [days, fc], func(): _sail(_spot))
-		if found:
-			go.disabled = true
-			go.tooltip_text = "已经探过了，不必再去。"
-		elif not ok["ok"]:
-			go.disabled = true
-			go.tooltip_text = ok["msg"]
-		side_body.add_child(go)
-	elif not fl.is_empty():
-		side_body.add_child(UiKit.label("旗舰航行中：前往 %s，剩 %d 天" % [GameData.port_name(fl["to"]), int(fl["arrive"]) - int(sim.s["day"])], 15, UiKit.JADE, true))
+	elif found:
+		side_body.add_child(UiKit.label("已经探过了，不必再去。", 14, UiKit.MUTED))
+	else:
+		# the flagship and any survey boat sailing on its own can go and look
+		var any := false
+		for o in sim.ships_of(sim.pid()):
+			if not sim.docked(o) or o["port"] == _spot or sim.in_fleet(o) or not (o["flagship"] or o["type"] == "survey"):
+				continue
+			any = true
+			var ok := sim.sail_ok(o, _spot)
+			var days := sim.ship_days(o, _spot)
+			var fc := sim.fuel_cost_for(o, _spot)
+			var oid: int = o["id"]
+			var go := UiKit.button("%s%s 前往探索 · %d 天 · 补给 %d 金" % ["旗舰 " if o["flagship"] else "测绘艇 ", o["name"], days, fc], func(): _sail_ship(oid, _spot))
+			if not ok["ok"]:
+				go.disabled = true
+				go.tooltip_text = ok["msg"]
+			side_body.add_child(go)
+		if not any and not fl.is_empty() and not sim.docked(fl):
+			side_body.add_child(UiKit.label("旗舰航行中：前往 %s，剩 %d 天" % [GameData.port_name(fl["to"]), int(fl["arrive"]) - int(sim.s["day"])], 15, UiKit.JADE, true))
+		elif not any:
+			side_body.add_child(UiKit.label("没有能出发的船。旗舰或单独行动的测绘艇停在港口时可以来探索。", 13, UiKit.MUTED))
 	side_body.add_child(HSeparator.new())
 	side_body.add_child(UiKit.label("东云域探索 · 已发现 %d / %d" % [sim.found_spots().size(), GameData.SPOT_IDS.size()], 16, UiKit.INK, true))
 	var seen := sim.seen_spots()
@@ -1689,6 +1698,22 @@ func _trade(is_buy: bool, g: String, qty: int) -> void:
 	_act(res)
 
 
+## Send one of the player's own ships (a survey boat exploring on its own) somewhere.
+func _sail_ship(ship_id: int, dest: String) -> void:
+	var sh := sim.ship(ship_id)
+	if sh.get("flagship", false):
+		_sail(dest)
+		return
+	var res := sim.depart(ship_id, dest)
+	_act(res)
+	if res["ok"]:
+		sfx("sail")
+		map.set_region(GameData.region_of(dest))
+		_refresh_region_btn()
+		_refresh_fleet()
+		_refresh_side()
+
+
 func _sail(dest: String) -> void:
 	var fl := sim.flagship()
 	var res := sim.depart(fl["id"], dest)
@@ -2069,6 +2094,13 @@ func _ship_card(sh: Dictionary) -> Control:
 	var bu := sim.unit_of(sh)
 	tv.add_child(UiKit.label("货舱 %d · 航速 ×%.2f · 炮 %d · 耐久 %d/%d · 船员 %d" % [sim.cargo_cap(sh), sim.speed_mult(sh), int(bu["guns"]), int(bu["hp"]), int(bu["hp_max"]), int(bu["crew"])], 12, UiKit.MUTED if int(sh.get("dmg", 0)) == 0 else UiKit.TERRA))
 	hd.add_child(tv)
+	if sim.docked(sh) and not GameData.PORTS.has(sh["port"]) and not sh["flagship"] and not sim.in_fleet(sh):
+		# a survey boat anchored in the fog: call it back to the nearest charted port
+		var back := sim.nearest_open_port(sh["port"])
+		var bb := UiKit.button("返航 %s · %d 天" % [GameData.port_name(back), sim.ship_days(sh, back)], func(): _sail_ship(id, back), true)
+		bb.add_theme_font_size_override("font_size", 12)
+		bb.tooltip_text = "停在 %s。也可以在海图上点一个「?」派它继续探索。" % GameData.port_name(sh["port"])
+		hd.add_child(bb)
 	if int(sh.get("dmg", 0)) > 0:
 		var rpb := UiKit.button("修理 %s 金" % UiKit.money(sim.repair_cost(sh)), func(): _act(sim.repair_ship(id)); _refresh_fleet(); _refresh_side())
 		rpb.add_theme_font_size_override("font_size", 12)

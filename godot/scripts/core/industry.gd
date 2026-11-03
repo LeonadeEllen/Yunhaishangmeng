@@ -46,7 +46,7 @@ static func output(sim: Sim, pid: String, pl: Dictionary) -> int:
 	var n: int = GameData.TIER_OUTPUT[GameData.tier(g)] + int(pl["lvl"]) - 1
 	if g in GameData.PORTS[pid]["make"]:
 		n += GameData.SIGNATURE_BONUS
-	if sim.perk(pl["owner"]) == "industry":
+	if sim.perk(pl["owner"]) == "industry" and GameData.tier(g) == 1:
 		n += 1
 	if pl["owner"] == sim.pid():
 		n = int(roundf(float(n) * (1.0 + 0.15 * sim.spec_bonus("forge"))))

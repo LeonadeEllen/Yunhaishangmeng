@@ -215,6 +215,7 @@ const WIND := [Vector2(-1, 0), Vector2(0, -1), Vector2(1, 0), Vector2(0, 1)]   #
 const WIND_NAMES := ["东风", "南风", "西风", "北风"]
 const WIND_EFFECT := 0.15          # ±15% travel days between full head- and tail-wind
 const ENCOUNTER_CHANCE := 0.06     # per voyage of a laden flagship after day 60
+const RIVAL_ENCOUNTER := 0.05      # per laden voyage of a rival ship: pirates rob everyone
 const TOLL_RATE := 0.06            # pirates' price for leaving you alone (of your gold, min TOLL_MIN)
 const TOLL_MIN := 300
 const REPAIR_RATE := 0.3           # yard repair = price × damage share × this
@@ -256,9 +257,9 @@ const HOUSES := {
 	"lamp":  {"name": "灯油行会", "leader": "霍照野", "home": "qianqi",  "gold": 12000, "emblem": 0, "portrait": 0, "color": Color("b08a3e"),
 		"perk": "sell", "perk_text": "卖出价格 +5%", "pitch": "千旗市的老牌商行，靠一手好买卖起家。最适合专心跑商。"},
 	"iron":  {"name": "铁誓舰团", "leader": "韦朔",   "home": "tonghe",  "gold": 12000, "emblem": 1, "portrait": 1, "color": Color("5b7186"),
-		"perk": "ships", "perk_text": "购买飞艇便宜 20%", "pitch": "铜鹤矶的船坞世家。船多路广，靠规模取胜。"},
+		"perk": "ships", "perk_text": "购买飞艇便宜 20%，飞艇航速 +10%", "pitch": "铜鹤矶的船坞世家。船多路广，靠规模取胜。"},
 	"tower": {"name": "白塔议士", "leader": "殷望舒", "home": "xiajing", "gold": 12000, "emblem": 2, "portrait": 2, "color": Color("8e8a7a"),
-		"perk": "industry", "perk_text": "工坊便宜 25%，每天多产 1 件", "pitch": "霞鲸台的议士们擅长投资产业，慢热但后劲足。"},
+		"perk": "industry", "perk_text": "工坊便宜 25%，原料产地每天多产 1 件", "pitch": "霞鲸台的议士们擅长投资产业，慢热但后劲足。"},
 }
 const HOUSE_IDS := ["lamp", "iron", "tower"]
 const PLAYER := "lamp"

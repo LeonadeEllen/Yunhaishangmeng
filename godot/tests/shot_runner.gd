@@ -240,6 +240,13 @@ func run(m: Control) -> void:
 	main._refresh_all()
 	await _wait(0.4)
 	await _shot("18d_east_charted")
+	# round 11: an eastern event
+	EventBook._open(main.sim, EventBook.EAST[0])
+	main._show_event()
+	await _wait(0.4)
+	await _shot("19_east_event")
+	main._choose_event(1)
+	main._close_modal()
 	main.sim.s["crown"] = {"hid": main.sim.pid(), "day": main.sim.s["day"]}
 	main._crown_celebration()
 	await _wait(0.4)

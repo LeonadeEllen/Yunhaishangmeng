@@ -96,6 +96,33 @@ const RANDOM := [
 ]
 
 
+# Only met in the eastern sea (round 11): the other culture's ways of doing business.
+const EAST := [
+	{"id": "bell_fair", "title": "铜钟集市", "art": "events/14", "text": "整点钟响，码头上摆开了铜匠行会的集市。东边的商人对西边的货好奇得很，愿意出高价。",
+	 "choices": [
+		{"label": "把船上的货全卖给他们（卖价 +25%）", "effects": {"sell_bonus": 0.25, "say": "铜匠们用铜铃付账，叮叮当当装了一箱。"}},
+		{"label": "按市价慢慢卖", "effects": {}},
+	 ]},
+	{"id": "interpreter", "title": "通译", "art": "events/04", "text": "一个会说两边话的少年挤到船边，愿意替你跟城里人打交道，只要一点工钱。",
+	 "choices": [
+		{"label": "雇下他（−300 金）", "effects": {"gold": -300, "friend": 80, "say": "有了通译，城里人对你的脸色好了许多。"}},
+		{"label": "比划着也能做生意", "effects": {"say": "你用手势谈成了买卖，少付了一点，也多花了半天。"}},
+	 ]},
+	{"id": "east_storm", "title": "东海风暴", "art": "events/10", "text": "东边的风暴来得毫无预兆，整片云海翻成了灰色。",
+	 "choices": [
+		{"label": "进港避风（补给 −400 金）", "effects": {"gold": -400, "say": "风暴过后，船一点没伤。"}},
+		{"label": "硬闯", "effects": {"lose_cargo": 0.1, "say": "船穿过了风暴，货舱进了水，丢了一成货。"}},
+	 ]},
+	{"id": "lantern_night", "title": "灯夜", "art": "events/15", "text": "雾隐泊的灯夜：全城的灯一起点亮，灯油铺子半价清仓。",
+	 "choices": [
+		{"label": "买下 12 桶灯油（−900 金）", "effects": {"gold": -900, "good": ["oil", 12], "say": "灯油装满了货舱的一角。"}},
+		{"label": "只看灯", "effects": {"say": "你在灯下站了一夜。"}},
+	 ]},
+	{"id": "bell_rumour", "title": "钟楼的传闻", "art": "events/11", "text": "酒馆里有人说，雾的更深处还有一座会响的钟楼，谁找到谁就能发财。",
+	 "choices": [{"label": "记下来", "effects": {"say": "传闻记进了航海日志。"}}]},
+]
+
+
 static func maybe_trigger(sim: Sim) -> void:
 	var s := sim.s
 	if s["event"] != null or s["over"] != null:
@@ -113,7 +140,11 @@ static func maybe_trigger(sim: Sim) -> void:
 	if s.has("arrived"):
 		s.erase("arrived")
 		if sim.rng.randf() < 0.14:
-			_open(sim, RANDOM[sim.rng.randi() % RANDOM.size()])
+			var fl := sim.flagship()
+			var pool: Array = RANDOM
+			if not fl.is_empty() and sim.docked(fl) and GameData.region_of(fl["port"]) == 2 and sim.rng.randf() < 0.6:
+				pool = EAST
+			_open(sim, pool[sim.rng.randi() % pool.size()])
 
 
 static func _open(sim: Sim, ev: Dictionary) -> void:
@@ -127,7 +158,7 @@ static func _find(id: String) -> Dictionary:
 		var ch: Dictionary = Characters.CHARS[parts[1]]["story"][int(parts[2])]
 		return {"id": id, "title": ch["title"], "text": ch["text"], "art": "", "cid": parts[1], "chapter": int(parts[2]),
 			"choices": ch["choices"].map(func(c): return {"label": c["label"], "effects": c["fx"]})}
-	for e in STORY + RANDOM + [PIRATES]:
+	for e in STORY + RANDOM + EAST + [PIRATES]:
 		if e["id"] == id:
 			return e
 	return {}
@@ -171,6 +202,18 @@ static func resolve(sim: Sim, choice: int) -> Dictionary:
 	if fx.has("intel"):
 		for pid in sim.open_ports():
 			sim._update_intel(pid)
+	if fx.has("sell_bonus") and not fl.is_empty() and sim.docked(fl):
+		var bonus := 0.0
+		for g in fl["cargo"].keys():
+			var r := sim.sell(int(fl["id"]), g, int(fl["cargo"][g]["qty"]))
+			if r["ok"]:
+				bonus += float(r.get("revenue", 0)) * float(fx["sell_bonus"])
+		h["gold"] += bonus
+		h["month_in"] += bonus
+		if bonus > 0.0:
+			msgs.append("多赚了 %d 金。" % int(bonus))
+	if fx.has("friend") and not fl.is_empty() and sim.docked(fl):
+		sim.add_friend(fl["port"], sim.pid(), int(fx["friend"]))
 	if fx.has("explore"):
 		sim.open_east()
 	if fx.has("stock"):

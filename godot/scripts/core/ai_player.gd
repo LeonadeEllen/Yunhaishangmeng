@@ -115,8 +115,10 @@ static func _best_plan(sim: Sim, sh: Dictionary, needs: Dictionary) -> Dictionar
 	var port: String = sh["port"]
 	var home: String = GameData.HOUSES[hid]["home"]
 	var space := sim.cargo_cap(sh) - sim.cargo_used(sh)
-	# keep a reserve for wages, but never so much that the fleet stops trading altogether
-	var budget: float = h["gold"] - minf(RESERVE, maxf(0.0, h["gold"]) * 0.3)
+	# keep a reserve for wages, but never so much that the fleet stops trading altogether;
+	# a trading house keeps less back and puts more of its chest on the line
+	var share := 0.15 if sim.perk(hid) == "sell" else 0.3
+	var budget: float = h["gold"] - minf(RESERVE, maxf(0.0, h["gold"]) * share)
 	if space <= 0 or budget <= 200.0:
 		return {}
 	# materials matter more once the gold for the stage is in hand
@@ -125,7 +127,7 @@ static func _best_plan(sim: Sim, sh: Dictionary, needs: Dictionary) -> Dictionar
 	if lh["stage"] < GameData.LIGHTHOUSE.size() and h["gold"] > float(GameData.LIGHTHOUSE[lh["stage"]]["gold"]) * 0.6:
 		mat_w = MAT_WEIGHT * 2.5
 	var best := {}
-	var best_rate := 12.0
+	var best_rate := 8.0 if sim.perk(hid) == "sell" else 12.0
 	for g in GameData.traded_goods(port):
 		var unit := sim.buy_price(port, g, hid)
 		var max_qty := mini(space, int(budget / maxf(1.0, unit * 1.3)))
@@ -190,14 +192,15 @@ static func monthly(sim: Sim, hid: String) -> void:
 			sim.start_lighthouse(hid)
 			return
 	var ships := sim.ships_of(hid)
+	var style := sim.perk(hid)   # "sell" trades, "ships" sails, "industry" builds
 	# build industry with money not earmarked for the next lighthouse stage
 	if lh["stage"] < GameData.LIGHTHOUSE.size():
 		var next_cost: float = GameData.LIGHTHOUSE[lh["stage"]]["gold"]
 		var spare: float = h["gold"] - WORKING_CAPITAL - (next_cost * 0.5 if lh["stage"] == 0 else next_cost)
 		Industry.ai_blueprints(sim, hid)
-		if spare > 4000.0:
+		if spare > (2000.0 if style == "industry" else 4000.0):
 			Industry.ai_build(sim, hid, spare)
-		if spare > 60000.0:
+		if spare > (40000.0 if style == "industry" else 60000.0):
 			Industry.ai_upgrade(sim, hid, spare * 0.5)
 		# contest the player's strongest foothold now and then
 		elif lh["stage"] >= 1 and sim.rng.randf() < 0.15:
@@ -212,7 +215,7 @@ static func monthly(sim: Sim, hid: String) -> void:
 						break
 				break
 	# Keep enough for the next lighthouse stage before expanding.
-	if ships.size() < sim.max_ships(hid) and h["gold"] > sim.ship_price("galleon", hid) + WORKING_CAPITAL * 2.0:
+	if ships.size() < sim.max_ships(hid) and h["gold"] > sim.ship_price("galleon", hid) + WORKING_CAPITAL * (1.0 if style == "ships" else 2.0):
 		var home: String = GameData.HOUSES[hid]["home"]
 		h["gold"] -= sim.ship_price("galleon", hid)
 		sim._add_ship(hid, "galleon", home)

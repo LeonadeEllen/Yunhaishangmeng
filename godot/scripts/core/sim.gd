@@ -272,7 +272,8 @@ func speed_mult(sh: Dictionary) -> float:
 
 
 func _speed_mult_base(sh: Dictionary) -> float:
-	return (1.0 + 0.1 * float(mod_lvl(sh, "sail"))) * (0.92 if mod_lvl(sh, "hold") > 0 else 1.0)
+	var fleet_perk := 1.1 if perk(sh["owner"]) == "ships" else 1.0
+	return fleet_perk * (1.0 + 0.1 * float(mod_lvl(sh, "sail"))) * (0.92 if mod_lvl(sh, "hold") > 0 else 1.0)
 
 
 # ------------------------------------------------------------------ fleet (escorts sail with the flagship)
@@ -744,6 +745,8 @@ func depart(ship_id: int, dest: String) -> Dictionary:
 	if sh["owner"] == pid() and sh["flagship"]:
 		# pirates are thicker in the east (and around the strait)
 		s["sailed"] = GameData.EAST_ENCOUNTER if (GameData.region_of(sh["from"]) == 2 or GameData.region_of(dest) == 2) else 1.0
+	elif sh["owner"] != pid():
+		_rival_raid(sh, dest)
 	var n := fleet_ships(sh).size()
 	return {"ok": true, "msg": "%s%s 起航前往 %s，预计 %d 天，补给 %d 金。" % [sh["name"], ("等 %d 艘" % n) if n > 1 else "", GameData.port_name(dest), days, fc]}
 
@@ -1502,6 +1505,46 @@ func _crew_monthly() -> void:
 		_say("传闻：一位语言不通的异乡商人在 %s 的酒馆落脚。" % GameData.port_name(s["roam"]["port"]), "info")
 
 
+## Pirates rob rivals too: a laden rival ship setting out may be stopped. Strong ships drive them
+## off (and pocket a little loot); the rest pay the toll, or lose cargo when the chest is empty.
+func _rival_raid(sh: Dictionary, dest: String, force: bool = false) -> Dictionary:
+	var day := int(s["day"])
+	if not force and (day <= 60 or cargo_used(sh) == 0):
+		return {}
+	var east := GameData.region_of(sh["port"]) == 2 or GameData.region_of(dest) == 2
+	if not force and rng.randf() >= GameData.RIVAL_ENCOUNTER * (GameData.EAST_ENCOUNTER if east else 1.0):
+		return {}
+	var hid: String = sh["owner"]
+	var h := house(hid)
+	var mine := Battle.power(unit_of(sh))
+	var year := day / GameData.DAYS_YEAR
+	var target := int(float(mine) * rng.randf_range(0.45, 0.85) * (1.0 + 0.05 * float(year)))
+	var enemies := _pirate_fleet(maxi(100, target))
+	var theirs := _fleet_power_of(enemies)
+	var hname: String = GameData.HOUSES[hid]["name"]
+	if mine >= int(float(theirs) * 1.25):
+		var loot := 0
+		for t in enemies:
+			loot += int(float(GameData.SHIPS[t]["price"]) * 0.06)
+		h["gold"] += float(loot)
+		h["month_in"] += float(loot)
+		return {"result": "win", "gold": loot}
+	# rivals cannot choose to fight back, so their toll is capped: a nuisance, not a tax on the rich
+	var t := minf(4000.0, maxf(float(GameData.TOLL_MIN), maxf(0.0, float(h["gold"])) * GameData.TOLL_RATE))
+	if h["gold"] >= t:
+		h["gold"] -= t
+		h["month_out"] += t
+		return {"result": "toll", "gold": int(t)}
+	# too poor to pay: the pirates help themselves to the hold
+	var lost := 0
+	for g in sh["cargo"].keys():
+		var n := int(ceil(float(sh["cargo"][g]["qty"]) * 0.5))
+		_unstow(sh, g, n)
+		lost += n
+	_say("%s 的 %s 在 %s 外海被云盗劫走了 %d 件货。" % [hname, sh["name"], GameData.port_name(sh["port"]), lost], "rival")
+	return {"result": "loss", "lost": lost}
+
+
 # ---------------------------------------------------------------- exploration (the eastern fog)
 
 ## Ports anyone can sail to: the west, plus eastern cities the player has found.
@@ -1530,7 +1573,7 @@ func sight() -> float:
 	var f := 1.0 + 0.25 * spec_bonus("survey")
 	for sh in ships_of(pid()):
 		if sh["type"] == "survey":
-			f += 0.15
+			f += 0.3   # a survey boat anywhere in the fleet: the charts fill in faster
 			break
 	return GameData.SIGHT * f
 
@@ -1577,8 +1620,8 @@ func sail_ok(sh: Dictionary, dest: String) -> Dictionary:
 	if GameData.PORTS.has(dest) and not GameData.SPOTS.has(dest):
 		return _fail("海图上还没有这座城。")
 	if GameData.SPOTS.has(dest):
-		if sh["owner"] != pid() or not sh["flagship"]:
-			return _fail("只有旗舰能去探索。")
+		if sh["owner"] != pid() or not (sh["flagship"] or sh["type"] == "survey"):
+			return _fail("只有旗舰和测绘艇能去探索。")
 		if not spot_seen(dest):
 			return _fail("雾太厚，还看不见那里。")
 		if spot_found(dest):
@@ -2040,7 +2083,7 @@ func _tick_ships() -> void:
 func _on_arrive(sh: Dictionary) -> void:
 	if sh["owner"] == pid():
 		var at_spot: bool = not GameData.PORTS.has(sh["port"])   # anchored at a point in the fog
-		if GameData.SPOTS.has(sh["port"]) and sh["flagship"] and not s["explore"]["found"].has(sh["port"]):
+		if GameData.SPOTS.has(sh["port"]) and (sh["flagship"] or sh["type"] == "survey") and not s["explore"]["found"].has(sh["port"]):
 			_discover(sh, sh["port"])
 		if not at_spot:
 			_update_intel(sh["port"])
