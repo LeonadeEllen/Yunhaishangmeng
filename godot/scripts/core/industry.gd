@@ -266,11 +266,16 @@ static func demolish(sim: Sim, pid: String, i: int) -> Dictionary:
 	return {"ok": true, "msg": "拆除%s工坊，回收 %d 金。" % [GameData.good_name(pl["b"]), refund]}
 
 
-static func buyout_cost(sim: Sim, pid: String, i: int) -> int:
+static func buyout_cost(sim: Sim, pid: String, i: int, hid: String = "") -> int:
+	if hid == "":
+		hid = sim.pid()
 	var pl = sim.s["ports"][pid]["plots"][i]
 	if pl == null:
 		return 0
-	return int(float(GameData.build_cost(pl["b"])) * float(pl["lvl"]) * GameData.BUYOUT_MULT)
+	var cost := float(GameData.build_cost(pl["b"])) * float(pl["lvl"]) * GameData.BUYOUT_MULT
+	if pl["owner"] != hid and sim.tie_state(hid, pl["owner"]) == "feud":
+		cost *= GameData.FEUD_BUYOUT   # a 宿敌's foreman is easy to turn (round 26)
+	return int(cost)
 
 
 static func buyout(sim: Sim, pid: String, i: int, hid: String = "") -> Dictionary:
@@ -283,11 +288,12 @@ static func buyout(sim: Sim, pid: String, i: int, hid: String = "") -> Dictionar
 		return sim._fail("没有%s的图纸，接手了也开不了工。" % GameData.good_name(pl["b"]))
 	if count_buildings(sim, pid, hid) >= build_limit(sim, pid, hid):
 		return sim._fail("你在这座城最多建 %d 座。" % build_limit(sim, pid, hid))
-	var cost := buyout_cost(sim, pid, i)
+	var cost := buyout_cost(sim, pid, i, hid)
 	var h := sim.house(hid)
 	if h["gold"] < cost:
 		return sim._fail("需要 %d 金。" % cost)
 	var target: String = pl["owner"]
+	sim.add_tie(hid, target, -GameData.TIE_BUYOUT)
 	var before := sim.patron(pid)
 	h["gold"] -= cost
 	h["month_out"] += cost

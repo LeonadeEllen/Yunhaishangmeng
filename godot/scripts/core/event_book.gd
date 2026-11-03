@@ -266,8 +266,21 @@ static func rival_meeting(sim: Sim, hid: String) -> void:
 	choices.append({"label": "买通港务，拖住%s的船 %d 天（%s 金，可能败露）" % [hh["name"], GameData.RIVAL_DELAY_DAYS, UiKit.money(GameData.RIVAL_DELAY_COST)],
 		"effects": {"delay_rival": {"hid": hid, "port": port}}})
 	var drink := {"iron": "韦朔酒量惊人，临走拍着你的肩说下次再赛。", "tower": "殷望舒只喝了半杯茶，却把本城哪位官员好说话都告诉了你。", "lamp": "霍照野喝到一半开始推销灯油，你买了两坛才脱身。"}
-	choices.append({"label": "请%s喝一杯（300 金，本城友好度 +40）" % he,
-		"effects": {"gold": -300, "friend": 40, "say": drink[hid]}})
+	# the relationship colours the meeting (round 26)
+	var st := sim.tie_state(hid)
+	if st == "ally":
+		text += " %s是你的盟友，寒暄得格外热络。" % hh["leader"]
+		choices.append({"label": "交换行情（盟友之间，免费拿到全部港口的最新行情）", "effects": {"intel_share": hid}})
+	elif st == "feud":
+		text += " %s看见你，脸色沉了下来。" % hh["leader"]
+		choices.append({"label": "赔一坛好酒修好（800 金，关系 +10）", "effects": {"gold": -800, "tie": {"hid": hid, "d": 10}, "say": "%s接了酒，没说话，但也没把酒倒掉。" % hh["leader"]}})
+	elif sim.tie(hid) >= GameData.TIE_ASK_MIN:
+		var pitch := {"iron": "韦朔忽然正色：「%s，咱们两家不如结个盟。船坞的事我帮你，你的买卖也带带我。」", "tower": "殷望舒合上扇子：「%s，白塔议士愿与贵会结盟。两家不争地，有事互相照应。」", "lamp": "霍照野压低声音：「%s，这云海三家，两家合伙才稳。结个盟？」"}
+		text += " " + pitch[hid] % me
+		choices.append({"label": "答应结盟：两家不再互相抢地，灯塔互助，灯节互赠", "effects": {"ally": hid, "say": "%s伸出手，你握住了。码头上的人都看见两家当家站在一起。" % hh["leader"]}})
+	if st != "feud":
+		choices.append({"label": "请%s喝一杯（300 金，本城友好度 +40，关系 +%d）" % [he, GameData.TIE_DRINK],
+			"effects": {"gold": -300, "friend": 40, "tie": {"hid": hid, "d": GameData.TIE_DRINK}, "say": drink[hid]}})
 	choices.append({"label": "点头致意，各忙各的", "effects": {}})
 	sim.s["event"] = {"id": "rival:%s" % hid, "title": "%s · %s在港" % [hh["leader"], hh["name"]], "text": text, "art": "events/14", "choices": choices}
 
@@ -409,6 +422,9 @@ static func resolve(sim: Sim, choice: int) -> Dictionary:
 		var p := clampf(0.3 + 0.05 * float(sim.hero_abil("sail")) + 0.03 * float(sim.post_level("nav")) + (sim.speed_mult(fl) - 1.0) * 1.5, 0.2, 0.85)
 		var rl: String = GameData.HOUSES[rc["hid"]]["leader"]
 		var rrep := int(rc.get("rep", 40))
+		if sim.tie_state(rc["hid"]) == "feud":
+			rrep = int(float(rrep) * GameData.FEUD_REP_MULT)
+		sim.add_tie(sim.pid(), rc["hid"], -GameData.TIE_RACE)
 		if sim.rng.randf() < p:
 			h["gold"] += stake
 			h["month_in"] += stake
@@ -429,6 +445,9 @@ static func resolve(sim: Sim, choice: int) -> Dictionary:
 		var dl: String = GameData.HOUSES[db["hid"]]["leader"]
 		var win := int(db.get("win", 80))
 		var lose := int(db.get("lose", 30))
+		if sim.tie_state(db["hid"]) == "feud":
+			win = int(float(win) * GameData.FEUD_REP_MULT)
+		sim.add_tie(sim.pid(), db["hid"], -GameData.TIE_DUEL)
 		var p2 := clampf(0.3 + 0.06 * float(sim.hero_abil("charm")) + 0.05 * float(sim.rep_level() - rival_lvl), 0.2, 0.85)
 		if sim.rng.randf() < p2:
 			sim.add_rep(sim.pid(), win)
@@ -445,6 +464,7 @@ static func resolve(sim: Sim, choice: int) -> Dictionary:
 			h["month_out"] += float(bb["cost"])
 			sim.house(bb["hid"])["gold"] += float(bb["cost"])
 			h["bp"][bb["good"]] = true
+			sim.add_tie(sim.pid(), bb["hid"], 3)
 			msgs.append("%s的%s到手了。" % [GameData.good_name(bb["good"]), "地契" if GameData.tier(bb["good"]) == 1 else "图纸"])
 		else:
 			msgs.append("金币不足，买卖没成。")
@@ -457,7 +477,8 @@ static func resolve(sim: Sim, choice: int) -> Dictionary:
 				h["rep"] = maxi(0, int(h["rep"]) - 40)
 				var f: Dictionary = sim.s["ports"][dr["port"]]["friend"]
 				f[sim.pid()] = maxi(0, int(f.get(sim.pid(), 0)) - 60)
-				msgs.append("港务官收了钱又告了密，全城都知道你干了什么。名声 −40，本城友好度大跌。")
+				sim.add_tie(sim.pid(), dr["hid"], -GameData.TIE_DELAY)
+				msgs.append("港务官收了钱又告了密，全城都知道你干了什么。名声 −40，本城友好度大跌，%s记下了这一笔。" % GameData.HOUSES[dr["hid"]]["name"])
 			else:
 				for sh in sim._ships_of(dr["hid"]):
 					if sh["port"] == dr["port"]:
@@ -465,6 +486,14 @@ static func resolve(sim: Sim, choice: int) -> Dictionary:
 				msgs.append("港务官收了钱，%s的船被拦在泊位里查了 %d 天的货单。" % [GameData.HOUSES[dr["hid"]]["name"], GameData.RIVAL_DELAY_DAYS])
 		else:
 			msgs.append("金币不足，港务官没理你。")
+	if fx.has("tie"):
+		sim.add_tie(sim.pid(), fx["tie"]["hid"], int(fx["tie"]["d"]))
+	if fx.has("ally"):
+		sim.set_tie(sim.pid(), fx["ally"], maxi(sim.tie(fx["ally"]), GameData.TIE_ALLY + 10))
+	if fx.has("intel_share"):
+		for port in sim.open_ports():
+			sim._update_intel(port)
+		msgs.append("%s的账房把各港的行情抄了一份给你。" % GameData.HOUSES[fx["intel_share"]]["leader"])
 	if fx.has("say"):
 		msgs.append(fx["say"])
 	sim.s["event"] = null

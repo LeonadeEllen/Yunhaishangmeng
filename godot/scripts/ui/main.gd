@@ -241,6 +241,7 @@ func _show_help() -> void:
 		"· 伙伴的故事：好感到 30 / 60 / 100 触发三章个人剧情，走完专长更强。好感到 60 的伙伴会托你办一件私事（限期送一批货到某港，在伙伴面板或那座港的酒馆交付），办成有谢礼、名声和好感，误期伤感情；办成后好感到 80 还有第二件更大的托付（送货、同行到某港或打赢一场空战），办成的伙伴从此不领薪水。两位、三位彼此相熟的伙伴之间也会有他们自己的场景。",
 		"· 对手：灯油行会靠跑商、铁誓舰团靠船队（船便宜、航速快、载货多）、白塔议士靠产业（工坊便宜、产地多产）。云盗对谁都下手，对手的船也会被劫。点顶栏的商会名随时看对手情报。",
 		"· 相遇：旗舰停进对手船所在的港口时，对手的当家可能来打招呼：赛船赌金、当众论道赌名声、向他们买地契和图纸、买通港务拖住他们的船，或者只是喝一杯。",
+		"· 盟与敌：三家之间各有一条关系。喝酒、送礼、买图纸拉近，赛船论道输的一方记仇，收购工坊、买通港务最伤。关系到 20 可在对手面板提议结盟，对手关系好时也会主动提：盟友不抢你的工坊、你开工建灯塔时出一份钱、灯节带贺礼、在港时交换行情。关系跌到 −40 或你主动翻脸就是宿敌：收购他们的工坊便宜 25%，赢他们名声 ×1.5，但他们会盯上你的工坊，灯节必来挑战。两家对手之间同样会结盟或翻脸：落后的两家往往走到一起对付领头的，领头的招人嫉恨。",
 		"· 灯节：每年开春灯节，三项颁奖（赛船冠军看最快的船、年度商王看一年身家涨幅、建设之光看恩主城数），奖金与名声，并回顾各家这一年：三位当家各有一句话，你的伙伴里也有人上台。灯节 12 天里甜霞果、丝云绸、霞果酒卖价 +15%。灯节夜里对手的当家可能来约一场赛船或论道，赌注和名声都比平日大，谢绝不丢分。",
 		"· 会馆：在老家的商馆页扩建商会总部（三级）：伙伴上限、每月名声、伙伴薪水折扣，最高一级船队上限 +1。",
 		"· 城建：在任何城主府出资修码头（补给更省、修船更快）、集市（行情恢复更快）、学堂（本城工坊增产），每项三级，全城受益。出资最多的商会是本城恩主：买货更便宜、每月得名声、城中立像。对手有钱时也会出资来争。",
@@ -660,7 +661,11 @@ func _refresh_top() -> void:
 	for hid in GameData.HOUSE_IDS:
 		var lh: Dictionary = sim.house(hid)["lh"]
 		var l2: Label = rival_box.get_node(hid).get_node("L")
-		l2.text = "破产" if sim.house(hid)["bankrupt"] else ("灯塔 %d/3%s" % [lh["stage"], "↑" if lh["building"] else ""])
+		var tag := ""
+		if hid != sim.pid() and not sim.house(hid)["bankrupt"]:
+			var ts := sim.tie_state(hid)
+			tag = " · 盟" if ts == "ally" else (" · 敌" if ts == "feud" else "")
+		l2.text = "破产" if sim.house(hid)["bankrupt"] else ("灯塔 %d/3%s%s" % [lh["stage"], "↑" if lh["building"] else "", tag])
 	var crisis: int = h["crisis"]
 	var cp := get_node_or_null("Crisis")
 	if cp:
@@ -1041,7 +1046,9 @@ func _show_festival() -> void:
 	for a in f["awards"]:
 		lines.append(("★ " if a["hid"] == sim.pid() else "· ") + a["text"] + "，奖金 %s 金、名声 +%d" % [UiKit.money(GameData.FESTIVAL_PRIZE), int(GameData.FESTIVAL_REP[a["kind"]])])
 	if f.has("challenge"):
-		lines.append("灯河边，%s正等着你。" % GameData.HOUSES[f["challenge"]]["leader"])
+		lines.append("灯河边，%s正等着你。%s" % [GameData.HOUSES[f["challenge"]]["leader"], "宿敌之间，这一场躲不掉。" if sim.tie_state(f["challenge"]) == "feud" else ""])
+	for gf in f.get("gifts", []):
+		lines.append("盟友%s送来 %s 金的贺礼。" % [GameData.HOUSES[gf["hid"]]["leader"], UiKit.money(int(gf["gold"]))])
 	var v := _modal("第 %d 年 · 灯节" % (int(f["year"]) + 1), "events/15", lines, [["继续", func():
 		_close_modal()
 		_refresh_all()
@@ -1057,7 +1064,7 @@ func _show_festival() -> void:
 		hb.add_child(UiKit.icon(UiKit.sprite("emblems", d["emblem"]), 24))
 		var mine_row: bool = hrow["hid"] == sim.pid()
 		var band := floorf(float(hrow["worth"]) / 10000.0) * 10000.0
-		var txt := "%s · 身家约 %s（%s）· 船 %d · 工坊 %d · 恩主 %d 城 · 灯塔 %d/3%s" % [d["name"], UiKit.money(band), _signed(floorf(float(hrow["gain"]) / 1000.0) * 1000.0), int(hrow["ships"]), int(hrow["workshops"]), int(hrow["bens"]), int(hrow["lh"]), " · 已破产" if hrow["bankrupt"] else ""]
+		var txt := "%s · 身家约 %s（%s）· 船 %d · 工坊 %d · 恩主 %d 城 · 灯塔 %d/3%s%s" % [d["name"], UiKit.money(band), _signed(floorf(float(hrow["gain"]) / 1000.0) * 1000.0), int(hrow["ships"]), int(hrow["workshops"]), int(hrow["bens"]), int(hrow["lh"]), " · 已破产" if hrow["bankrupt"] else "", (" · 与你：%s" % hrow["tie"]) if hrow.has("tie") and not hrow["bankrupt"] else ""]
 		hb.add_child(UiKit.label(txt, 13, UiKit.INK if mine_row else UiKit.MUTED, mine_row))
 		box.add_child(hb)
 		if hrow.has("say"):
@@ -2678,6 +2685,18 @@ func _show_rival(hid: String) -> void:
 	var h := sim.house(hid)
 	var lines := []
 	lines.append("当家 %s · 特长：%s · 名声「%s」%s" % [d["leader"], d["perk_text"], GameData.REP_NAMES[sim.rep_level(hid) - 1], " · 已破产" if h["bankrupt"] else ""])
+	# relationships (round 26)
+	if sim.tie(hid) != 0:
+		_hint("ties")
+	var tst := sim.tie_state(hid)
+	var st_text := {"ally": "不争你的工坊，你开工建灯塔时出一份钱，灯节带贺礼，当家在港时交换行情。", "feud": "收购他们的工坊便宜 %d%%，赛船论道赢了名声 ×%.1f；他们盯着你的工坊，灯节必来挑战。" % [int(roundf((1.0 - GameData.FEUD_BUYOUT) * 100.0)), GameData.FEUD_REP_MULT], "plain": "到 %d 可提议结盟（%d 起算盟友）；跌到 %d 就是宿敌。喝酒、买图纸、送礼拉近；赛船论道输的一方记仇，收购工坊、买通港务更伤。" % [GameData.TIE_ASK_MIN, GameData.TIE_ALLY, GameData.TIE_FEUD]}
+	lines.append("与你的关系：%s（%d）· %s" % [sim.tie_name(hid), sim.tie(hid), st_text[tst]])
+	var others := []
+	for o in GameData.HOUSE_IDS:
+		if o != hid and o != sim.pid() and not sim.house(o)["bankrupt"]:
+			others.append("与%s：%s（%d）" % [GameData.HOUSES[o]["name"], sim.tie_name(hid, o), sim.tie(hid, o)])
+	if not others.is_empty():
+		lines.append("、".join(others) + "。两家对手结了盟会互相出钱建灯塔、合力争地；翻了脸则见面就赛、互使绊子。")
 	var band := int(maxf(0.0, float(h["gold"])) / 10000.0) * 10000
 	lines.append("家底：约 %s 金%s" % [UiKit.money(band), ("，欠款 %s" % UiKit.money(h["debt"])) if h["debt"] > 0.5 else ""])
 	var lh: Dictionary = h["lh"]
@@ -2724,7 +2743,20 @@ func _show_rival(hid: String) -> void:
 	for g in h["bp"]:
 		bps.append(GameData.good_name(g))
 	lines.append("持有图纸：%s" % ("、".join(bps) if not bps.is_empty() else "无"))
-	_modal("%s · 动向" % d["name"], "", lines, [["关闭", func(): _close_modal()]], 720)
+	var btns := []
+	if not h["bankrupt"]:
+		var hh: String = hid
+		var gok := sim.tie_gift_ok(hid)
+		var gb_label := "赠礼示好（%s 金，关系 +%d）" % [UiKit.money(GameData.TIE_GIFT_COST), GameData.TIE_GIFT]
+		btns.append([gb_label if gok["ok"] else gb_label + " · " + str(gok["msg"]), func(): _act(sim.tie_gift(hh)); _show_rival(hh), true])
+		if tst != "ally":
+			var pok := sim.propose_ok(hid)
+			btns.append([("提议结盟" if pok["ok"] else "提议结盟 · " + str(pok["msg"])), func(): _act(sim.propose_ally(hh)); _show_rival(hh), true])
+		if tst != "feud":
+			btns.append(["翻脸", func(): _modal("与%s翻脸？" % d["name"], "", ["从今天起两家是宿敌：收购他们的工坊便宜，赢他们名声更多，但他们会盯上你的工坊，灯节必来挑战。关系会跌到 %d，要靠送礼和赔酒慢慢修。" % (GameData.TIE_FEUD - 10)],
+				[["翻脸", func(): _act(sim.break_off(hh)); _show_rival(hh), true], ["算了", func(): _show_rival(hh)]]), true])
+	btns.append(["关闭", func(): _close_modal()])
+	_modal("%s · 动向" % d["name"], "", lines, btns, 720)
 
 
 func _show_menu() -> void:
@@ -2774,6 +2806,7 @@ const HINTS := {
 	"hq": "商会总部：回到母港的商馆页可以扩建会馆，伙伴上限更高、每月添名声、薪水有折扣，最高一级还能多带一艘船。",
 	"intel": "对手情报：点顶栏的商会名随时查看对手的船、工坊、恩主城和灯塔进度。他们在同一港时，当家会来打招呼。",
 	"refit": "船坞改装：给船换炮、加货舱、升引擎都要花钱和时间，船员越多改得越快。旗舰和编队里的船一起改最省事。",
+	"ties": "三家的关系：喝酒、送礼、买图纸拉近，赛船论道输的一方记仇，收购工坊、买通港务最伤。关系够好可以结盟（不抢地、灯塔互助、灯节贺礼、交换行情），跌到底就是宿敌（收购他们的工坊便宜、赢他们名声更多，但他们会盯上你）。两家对手之间也会结盟或翻脸——落后的两家往往走到一起。",
 }
 
 

@@ -16,10 +16,16 @@ static func ship_turn(sim: Sim, sh: Dictionary) -> void:
 	if sim.in_fleet(sh):
 		sim.leave_fleet(int(sh["id"]))   # a captured prize trades on its own under the bot
 	# another house's captain docked here: now and then the two race (round 15)
-	if int(sim.s["day"]) - int(sim.s.get("rival_race_day", -999)) >= GameData.RIVAL_RACE_GAP and sim.rng.randf() < GameData.RIVAL_RACE:
+	# allies never race each other; feuding houses race three times as often (round 26)
+	if int(sim.s["day"]) - int(sim.s.get("rival_race_day", -999)) >= GameData.RIVAL_RACE_GAP:
+		var roll := sim.rng.randf()
 		for other in sim.s["ships"]:
 			if other["owner"] != hid and other["owner"] != sim.pid() and other["port"] == port and not sim.house(other["owner"])["bankrupt"]:
-				sim.rival_race(sh, other)
+				var st := sim.tie_state(hid, other["owner"])
+				if st == "ally":
+					continue
+				if roll < GameData.RIVAL_RACE * (GameData.FEUD_RACE_MULT if st == "feud" else 1.0):
+					sim.rival_race(sh, other)
 				break
 	for c in sim.open_contracts(port):
 		if sim.can_fulfill(sh, c):
@@ -209,20 +215,20 @@ static func monthly(sim: Sim, hid: String) -> void:
 		if spare > (40000.0 if style == "industry" else 60000.0):
 			Industry.ai_upgrade(sim, hid, spare * 0.5)
 		# contest someone else's strongest foothold now and then (the player's, or a rival's)
-		elif lh["stage"] >= 1 and sim.rng.randf() < 0.15:
+		elif lh["stage"] >= 1 and sim.rng.randf() < (0.3 if _has_feud(sim, hid) else 0.15):
 			var done := false
-			for other in GameData.HOUSE_IDS:
-				if other == hid or sim.house(other)["bankrupt"] or done:
+			for other in _buyout_targets(sim, hid):
+				if done:
 					continue
 				for port in sim.open_ports():
 					if sim.patron(port) != other or Industry.count_buildings(sim, port, other) < 2:
 						continue
 					var plots: Array = sim.s["ports"][port]["plots"]
 					for i in plots.size():
-						if plots[i] != null and plots[i]["owner"] == other and h["gold"] > next_cost + Industry.buyout_cost(sim, port, i) + WORKING_CAPITAL * 1.5:
+						if plots[i] != null and plots[i]["owner"] == other and h["gold"] > next_cost + Industry.buyout_cost(sim, port, i, hid) + WORKING_CAPITAL * 1.5:
 							var r := Industry.buyout(sim, port, i, hid)
 							if r["ok"]:
-								sim._say("%s 收购了%s在 %s 的%s工坊。" % [GameData.HOUSES[hid]["name"], GameData.HOUSES[other]["name"], GameData.port_name(port), GameData.good_name(plots[i]["b"])], "rival")
+								sim._say("%s 收购了%s在 %s 的%s工坊。%s" % [GameData.HOUSES[hid]["name"], GameData.HOUSES[other]["name"], GameData.port_name(port), GameData.good_name(plots[i]["b"]), "宿敌之间，寸土必争。" if sim.tie_state(hid, other) == "feud" else ""], "rival")
 								done = true
 							break
 					if done:
@@ -244,6 +250,25 @@ static func monthly(sim: Sim, hid: String) -> void:
 				h["gold"] += float(GameData.SHIPS[sh["type"]]["price"]) * 0.6
 				sim.s["ships"].erase(sh)
 				break
+
+
+## Houses whose workshops this one may buy out: feuds first, then the rest, never an ally (round 26).
+static func _buyout_targets(sim: Sim, hid: String) -> Array:
+	var out := []
+	for other in GameData.HOUSE_IDS:
+		if other != hid and not sim.house(other)["bankrupt"] and sim.tie_state(hid, other) == "feud":
+			out.append(other)
+	for other in GameData.HOUSE_IDS:
+		if other != hid and not sim.house(other)["bankrupt"] and sim.tie_state(hid, other) == "plain":
+			out.append(other)
+	return out
+
+
+static func _has_feud(sim: Sim, hid: String) -> bool:
+	for other in GameData.HOUSE_IDS:
+		if other != hid and not sim.house(other)["bankrupt"] and sim.tie_state(hid, other) == "feud":
+			return true
+	return false
 
 
 ## Fund the cheapest unfinished work in the home city, or in a city where the house is patron

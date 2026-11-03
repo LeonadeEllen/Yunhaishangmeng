@@ -19,6 +19,7 @@ func _init() -> void:
 		test_festival_challenge()
 		test_milestones()
 		test_leaders()
+		test_ties()
 		print("FAILURES: %d" % failures)
 		quit(1 if failures > 0 else 0)
 		return
@@ -41,6 +42,7 @@ func _init() -> void:
 	test_festival_challenge()
 	test_milestones()
 	test_leaders()
+	test_ties()
 	var seeds := [11, 22, 33, 44, 55]
 	var crowns := 0
 	var bot_stage := 0
@@ -1107,3 +1109,144 @@ func test_leaders() -> void:
 	check(sim.house("iron")["bankrupt"] and sim.s["event"] != null and str(sim.s["event"]["id"]) == "farewell:iron" and str(sim.s["event"]["text"]).contains("韦朔"), "韦朔 says goodbye when 铁誓舰团 goes under")
 	check(EventBook.resolve(sim, 0)["ok"] and sim.house()["rep"] == r0 + 30, "seeing him off is worth a little reputation")
 	check(sim.leader_line("iron", [], "") == GameData.LEADER_LINES["iron"]["bankrupt"], "his empty seat is remembered at the next review")
+
+
+func test_ties() -> void:
+	print("alliances and feuds between the houses (round 26)")
+	var sim := Sim.new()
+	sim.new_game(26)
+	sim.s["story"] = 3
+	sim.s["day"] = 1
+	var me := sim.pid()
+	check(sim.tie("iron") == 0 and sim.tie_state("iron") == "plain" and sim.tie_name("iron") == "平常", "a new game starts with every pair at 0")
+	var g0: float = sim.house()["gold"]
+	check(sim.tie_gift("iron")["ok"] and sim.tie("iron") == GameData.TIE_GIFT and sim.house()["gold"] == g0 - GameData.TIE_GIFT_COST, "a gift costs %d and warms the pair by %d" % [GameData.TIE_GIFT_COST, GameData.TIE_GIFT])
+	check(not sim.tie_gift("iron")["ok"], "no second gift within %d days" % GameData.TIE_GIFT_GAP)
+	check(not sim.propose_ally("iron")["ok"], "an alliance needs the relationship at %d first" % GameData.TIE_ASK_MIN)
+	var accepted := false
+	var refused := false
+	for i in 40:
+		sim.set_tie(me, "iron", GameData.TIE_ALLY - 1)
+		sim.s["tie_ask"] = {}
+		var n0: int = sim.s["log"].size()
+		check(sim.propose_ally("iron")["ok"], "the proposal itself is a valid move")
+		if sim.tie_state("iron") == "ally":
+			accepted = true
+			check(sim.allies_of(me) == ["iron"] and sim.s["log"].size() > n0 and str(sim.s["log"][-1][1]).contains("结为盟友"), "the alliance makes the news")
+			break
+		refused = true
+		check(sim.tie("iron") == GameData.TIE_ALLY - 1 - 5 and not sim.propose_ally("iron")["ok"], "a refusal costs 5 and %d days" % GameData.TIE_ASK_GAP)
+	check(accepted, "a warm house accepts the alliance sooner or later")
+	if not refused:
+		print("  (every proposal was accepted this time)")
+	check(not sim.propose_ally("iron")["ok"], "no proposing to an ally")
+	sim._tick_milestones()
+	check(sim.milestone_done("first_ally"), "the first alliance is a milestone")
+	# feud with the other house
+	check(sim.break_off("tower")["ok"] and sim.tie_state("tower") == "feud" and sim.tie("tower") == GameData.TIE_FEUD - 10, "翻脸 drops the pair straight into a feud")
+	check(not sim.break_off("tower")["ok"], "no breaking off twice")
+	var port := "muxia"
+	sim.house("tower")["gold"] = 100000.0
+	sim.house("tower")["bp"]["fish"] = true
+	var built := false
+	for i in sim.s["ports"][port]["plots"].size():
+		if Industry.build(sim, port, i, "fish", "tower")["ok"]:
+			var full := int(float(GameData.build_cost("fish")) * GameData.BUYOUT_MULT)
+			check(Industry.buyout_cost(sim, port, i) == int(float(full) * GameData.FEUD_BUYOUT) and Industry.buyout_cost(sim, port, i, "iron") == full, "a 宿敌's workshop sells for %d%% of the usual price, to the 宿敌 only" % int(roundf(GameData.FEUD_BUYOUT * 100.0)))
+			built = true
+			break
+	check(built, "the rival could build a fishery for the buyout check")
+	check(AiPlayer._buyout_targets(sim, "iron") == ["tower"] and AiPlayer._buyout_targets(sim, "tower") == [me, "iron"], "the bot buys from feuds first and never from an ally")
+	# the festival: an ally brings a gift and never challenges; a feud always does
+	sim.house("iron")["gold"] = 100000.0
+	sim.s["day"] = GameData.DAYS_YEAR - 1
+	sim.s["event"] = null
+	sim.s["encounter"] = null
+	sim.advance_day()
+	var f: Dictionary = sim.s["festival_show"]
+	check(f.get("challenge", "") == "tower" and sim.s["event"] != null and str(sim.s["event"]["id"]) == "rival:tower", "the 宿敌 always challenges at the festival")
+	check(f.has("gifts") and f["gifts"].size() == 1 and f["gifts"][0]["hid"] == "iron" and int(f["gifts"][0]["gold"]) >= GameData.ALLY_GIFT_MIN and int(f["gifts"][0]["gold"]) <= GameData.ALLY_GIFT_MAX and sim.s["log"].any(func(l): return str(l[1]).contains("贺礼")), "the ally brings a gift of %d%% of their gold (%d)" % [int(roundf(GameData.ALLY_GIFT * 100.0)), int(f.get("gifts", [{"gold": 0}])[0]["gold"])])
+	for row in f["houses"]:
+		if row["hid"] == "iron":
+			check(row.get("tie", "") == "盟友", "the review names the relationship")
+	# duelling a 宿敌 pays more reputation
+	var fx: Dictionary = sim.s["event"]["choices"][0]["effects"]
+	var base := int(fx.get("race", {}).get("rep", 0)) if fx.has("race") else int(fx.get("debate", {}).get("win", 0))
+	var r0: int = sim.house()["rep"]
+	var gold0: float = sim.house()["gold"]
+	var t0 := sim.tie("tower")
+	check(EventBook.resolve(sim, 0)["ok"], "the festival duel resolves")
+	var won: bool = sim.house()["rep"] > r0
+	check(won == false or sim.house()["rep"] - r0 == int(float(base) * GameData.FEUD_REP_MULT), "a win over a 宿敌 pays ×%.1f reputation (base %d)" % [GameData.FEUD_REP_MULT, base])
+	check(sim.tie("tower") == t0 - (GameData.TIE_DUEL if fx.has("debate") else GameData.TIE_RACE), "a duel sours the pair whoever wins")
+	check(gold0 != sim.house()["gold"] or fx.has("debate"), "a race moves gold")
+	# meetings: an ally shares intel, a 宿敌 can be appeased, a warm house proposes
+	sim.s["day"] += 1
+	sim.s["event"] = null
+	EventBook.rival_meeting(sim, "iron")
+	var ci := -1
+	for i in sim.s["event"]["choices"].size():
+		if sim.s["event"]["choices"][i]["effects"].has("intel_share"):
+			ci = i
+	check(ci >= 0 and str(sim.s["event"]["text"]).contains("盟友"), "an ally's captain offers to swap market news")
+	sim.s["intel"] = {}
+	check(EventBook.resolve(sim, ci)["ok"] and sim.s["intel"].size() == sim.open_ports().size(), "the swap fills in every open port")
+	sim.s["event"] = null
+	EventBook.rival_meeting(sim, "tower")
+	var cj := -1
+	for i in sim.s["event"]["choices"].size():
+		if sim.s["event"]["choices"][i]["effects"].has("tie") and sim.s["event"]["choices"][i]["effects"].has("gold"):
+			cj = i
+	check(cj >= 0 and str(sim.s["event"]["text"]).contains("脸色") and not sim.s["event"]["choices"].any(func(c): return c["effects"].has("friend")), "a 宿敌 gets no friendly drink, only an apology")
+	var t1 := sim.tie("tower")
+	check(EventBook.resolve(sim, cj)["ok"] and sim.tie("tower") == t1 + 10, "the apology warms the pair by 10")
+	sim.set_tie(me, "tower", GameData.TIE_ASK_MIN)
+	sim.s["event"] = null
+	EventBook.rival_meeting(sim, "tower")
+	var ck := -1
+	for i in sim.s["event"]["choices"].size():
+		if sim.s["event"]["choices"][i]["effects"].has("ally"):
+			ck = i
+	check(ck >= 0, "a warm house proposes the alliance itself")
+	check(EventBook.resolve(sim, ck)["ok"] and sim.tie_state("tower") == "ally", "accepting seals it")
+	# two rivals: an ally pays a share of a lighthouse stage; feuding houses trip each other up
+	var sim2 := Sim.new()
+	sim2.new_game(26)
+	sim2.s["story"] = 3
+	sim2.s["day"] = 1
+	sim2.set_tie("iron", "tower", 50)
+	check(sim2.tie_state("iron", "tower") == "ally" and str(sim2.s["log"][-1][1]).contains("结了盟"), "two rivals can ally, and the news says so")
+	sim2.house("tower")["gold"] = 200000.0
+	sim2.house("tower")["rep"] = 100000
+	sim2.house("iron")["gold"] = 100000.0
+	var st0: Dictionary = GameData.LIGHTHOUSE[0]
+	for g in st0["mats"]:
+		sim2.house("tower")["lh"]["mats"][g] = int(st0["mats"][g])
+	check(sim2.start_lighthouse("tower")["ok"], "the rival starts its lighthouse")
+	var share := int(float(st0["gold"]) * GameData.ALLY_LH_SHARE) / 100 * 100
+	check(sim2.house("iron")["gold"] == 100000.0 - share and sim2.house("tower")["gold"] == 200000.0 - float(st0["gold"]) + share, "the ally pays %d%% of the stage (%d)" % [int(roundf(GameData.ALLY_LH_SHARE * 100.0)), share])
+	var end0: int = sim2.house("tower")["lh"]["end"]
+	var hit := false
+	sim2.house()["gold"] = 1.0e9
+	sim2.house("iron")["gold"] = 1.0e6   # the richer of the two does the hitting
+	for i in 80:
+		sim2.set_tie("iron", "tower", -60)
+		sim2._tick_ties()
+		if int(sim2.house("tower")["lh"]["end"]) > end0:
+			hit = true
+			break
+	check(hit, "feuding rivals eventually sabotage each other's lighthouse")
+	# monthly drift: the two trailing houses draw together, the leader is envied, the player never drifts into a pact
+	var sim3 := Sim.new()
+	sim3.new_game(26)
+	sim3.house()["gold"] = 1.0e9
+	sim3._tick_ties()
+	check(sim3.tie("iron", "tower") == GameData.TIE_LEADER_DRIFT and sim3.tie("iron") == -GameData.TIE_ENVY and sim3.tie("tower") == -GameData.TIE_ENVY, "when the player leads, the rivals warm to each other and cool toward the player")
+	sim3.house()["gold"] = 1000.0
+	sim3.house("iron")["gold"] = 1.0e9
+	sim3.set_tie(sim3.pid(), "tower", GameData.TIE_DRIFT_CAP)
+	sim3._tick_ties()
+	check(sim3.tie("tower") == GameData.TIE_DRIFT_CAP and sim3.tie("iron", "tower") == GameData.TIE_LEADER_DRIFT - GameData.TIE_DECAY - GameData.TIE_ENVY, "drift alone never allies the player; old feelings fade by %d a month and the leader is envied" % GameData.TIE_DECAY)
+	# save round-trip
+	var sim4 := Sim.new()
+	check(sim4.from_json(sim.to_json()) and sim4.tie("iron") == sim.tie("iron") and typeof(sim4.s["ties"].values()[0]) == TYPE_INT and sim4.tie_state("tower") == "ally", "relationships survive a save")

@@ -328,6 +328,15 @@ func run(m: Control) -> void:
 	await _shot("38_farewell")
 	main._choose_event(1)
 	main._close_modal()
+	# round 26: alliances and feuds
+	main.sim.set_tie(main.sim.pid(), "iron", 55)
+	main.sim.set_tie(main.sim.pid(), "tower", -48)
+	main.sim.set_tie("iron", "tower", -52)
+	main._refresh_all()
+	main._show_rival("iron")
+	await _wait(0.4)
+	await _shot("40_ties")
+	main._close_modal()
 	main.sim.s["event"] = null
 	EventBook.festival_challenge(main.sim, "iron")
 	main._show_event()

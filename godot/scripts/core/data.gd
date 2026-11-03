@@ -350,6 +350,7 @@ const MILESTONES := [
 	{"id": "benefactor", "name": "第一座恩主城", "desc": "成为一座城的恩主。"},
 	{"id": "east", "name": "东云海", "desc": "旗舰到过东边的任何一座港。"},
 	{"id": "award", "name": "灯节得奖", "desc": "在灯节上拿到任意一项奖。"},
+	{"id": "first_ally", "name": "第一位盟友", "desc": "与一家对手商会结为盟友。"},
 	{"id": "free_crew", "name": "第一位免薪伙伴", "desc": "办成一位伙伴的第二件托付。"},
 	{"id": "worth_1m", "name": "身家百万", "desc": "净资产达到 1,000,000 金。"},
 	{"id": "lh2", "name": "灯廊", "desc": "点亮灯塔第二层。"},
@@ -362,6 +363,34 @@ const FESTIVAL_STAKE_MIN := 2000
 const FESTIVAL_STAKE_MAX := 15000
 const FESTIVAL_DUEL_REP := {"win": 120, "lose": 40}
 const LEADER_HE := {"lamp": "他", "iron": "他", "tower": "她"}
+
+# relationships between the three houses (round 26): −100 宿敌 … 100 盟友, one value per pair
+const TIE_ALLY := 40                 # at or above: 盟友
+const TIE_FEUD := -40                # at or below: 宿敌
+const TIE_DECAY := 1                 # per month, toward 0
+const TIE_LEADER_DRIFT := 4          # per month: the two houses trailing the richest warm to each other
+const TIE_ENVY := 2                  # per month: the richest house is resented by the other two
+const TIE_DRIFT_CAP := 35            # drift alone never allies or feuds a pair that includes the player
+const TIE_GIFT_COST := 3000
+const TIE_GIFT := 12
+const TIE_GIFT_GAP := 30             # days between gifts to the same house
+const TIE_ASK_MIN := 20              # relationship needed before proposing an alliance
+const TIE_ASK_GAP := 60              # days before asking the same house again
+const TIE_RACE := 8                  # a lost race sours the pair by this much
+const TIE_DUEL := 6                  # a lost debate or festival duel
+const TIE_DRINK := 6                 # a drink together
+const TIE_BUYOUT := 20               # buying a house's workshop out from under them
+const TIE_DELAY := 25                # a bribed harbour master, once it comes out
+const TIE_NAMES := ["宿敌", "不睦", "平常", "友善", "盟友"]
+const ALLY_LH_SHARE := 0.1           # an ally pays this share of a lighthouse stage when the other starts it
+const ALLY_GIFT := 0.05              # festival gift from an allied house: this share of their gold…
+const ALLY_GIFT_MIN := 1000          # …clamped to this range
+const ALLY_GIFT_MAX := 8000
+const FEUD_INCIDENT := 0.12          # per month, between two feuding houses
+const FEUD_DELAY_DAYS := 10
+const FEUD_BUYOUT := 0.75            # a 宿敌's workshop sells for this fraction of the usual buyout price
+const FEUD_REP_MULT := 1.5           # beating a 宿敌 in a race or debate pays this much more reputation
+const FEUD_RACE_MULT := 3.0          # feuding houses race each other this much more often
 const PLAYER := "lamp"
 
 # ------------------------------------------------------------------ protagonist

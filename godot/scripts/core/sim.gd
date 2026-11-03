@@ -187,7 +187,7 @@ func new_game(seed_value: int = 0, player: String = "lamp", difficulty: int = 1)
 		"event": null, "story": 0, "stats": {"trades": 0, "profit": 0, "best_trade": 0, "handled": {}, "contracts": 0},
 		"crown": null,
 		"hero": {"lvl": 1, "exp": 0, "pts": 0, "abil": {"sail": 1, "trade": 1, "fight": 1, "charm": 1}, "days_sailed": 0, "visited": {}},
-		"tutorial": 0, "hints": {}, "player": player, "fashion": null, "difficulty": difficulty,
+		"tutorial": 0, "hints": {}, "ties": {}, "player": player, "fashion": null, "difficulty": difficulty,
 		"contracts": [], "next_contract_id": 1,
 		"encounter": null, "battle": null, "battle_result": null,
 		"crew": {}, "roam": {"port": "", "until": 0},
@@ -1375,6 +1375,7 @@ func start_lighthouse(hid: String = "") -> Dictionary:
 	lh["end"] = s["day"] + int(st["days"])
 	if hid != pid():
 		_say("%s 开始建造灯塔%s（第 %d 层）。" % [GameData.HOUSES[hid]["name"], st["name"], int(lh["stage"]) + 1], "major")
+	_ally_chip_in(hid, int(st["gold"]))
 	return {"ok": true, "msg": "灯塔%s开工，%d 天后完工。" % [st["name"], st["days"]]}
 
 
@@ -1708,6 +1709,11 @@ func milestone_check(id: String) -> bool:
 			return false
 		"award":
 			return int(st.get("awards", 0)) >= 1
+		"first_ally":
+			for hid in GameData.HOUSE_IDS:
+				if hid != pid() and not house(hid)["bankrupt"] and tie_state(hid) == "ally":
+					return true
+			return false
 		"free_crew":
 			for cid in s["crew"]:
 				if s["crew"][cid].get("free", false):
@@ -2463,6 +2469,7 @@ func _festival() -> void:
 			"workshops": Industry.all_buildings(self, hid).size(), "bens": benefactor_ports(hid).size(), "lh": int(h["lh"]["stage"]), "bankrupt": h["bankrupt"]}
 		if hid != pid():
 			row["say"] = leader_line(hid, award_hids, top)
+			row["tie"] = tie_name(hid)
 		houses.append(row)
 	var st: Dictionary = s["stats"]
 	var mine := {"gain": float(gains.get(pid(), 0.0)),
@@ -2472,11 +2479,25 @@ func _festival() -> void:
 		"crew": s["crew"].size(), "visited": s["hero"]["visited"].size()}
 	s["festival_show"] = {"year": year, "awards": awards, "houses": houses, "mine": mine}
 	# a rival steps out of the crowd with a challenge (round 18)
-	var rivals := alive.filter(func(hid): return hid != pid())
-	if not rivals.is_empty() and s["event"] == null and rng.randf() < GameData.FESTIVAL_CHALLENGE:
-		var who: String = rivals[rng.randi() % rivals.size()]
+	var rivals := alive.filter(func(hid): return hid != pid() and tie_state(hid) != "ally")
+	var feuds := rivals.filter(func(hid): return tie_state(hid) == "feud")
+	if not rivals.is_empty() and s["event"] == null and (not feuds.is_empty() or rng.randf() < GameData.FESTIVAL_CHALLENGE):
+		var who: String = feuds[0] if not feuds.is_empty() else rivals[rng.randi() % rivals.size()]
 		EventBook.festival_challenge(self, who)
 		s["festival_show"]["challenge"] = who
+	# allied houses bring a gift to the review (round 26)
+	for o in allies_of(pid()):
+		var g := int(clampf(float(house(o)["gold"]) * GameData.ALLY_GIFT, float(GameData.ALLY_GIFT_MIN), float(GameData.ALLY_GIFT_MAX))) / 100 * 100
+		if float(house(o)["gold"]) < float(g) + AiPlayer.WORKING_CAPITAL:
+			continue
+		house(o)["gold"] -= g
+		house(o)["month_out"] += g
+		house()["gold"] += g
+		house()["month_in"] += g
+		if not s["festival_show"].has("gifts"):
+			s["festival_show"]["gifts"] = []
+		s["festival_show"]["gifts"].append({"hid": o, "gold": g})
+		_say("灯节上，%s送来 %s 金的贺礼。" % [GameData.HOUSES[o]["leader"], UiKit.money(g)], "good")
 	if not s["crew"].is_empty():
 		var mates: Array = s["crew"].keys()
 		var who: String = mates[rng.randi() % mates.size()]
@@ -2502,6 +2523,7 @@ func rival_race(a: Dictionary, b: Dictionary) -> void:
 	house(win)["gold"] += stake
 	house(lose)["gold"] -= stake
 	add_rep(win, 30)
+	add_tie(win, lose, -GameData.TIE_RACE)
 	s["rival_race_day"] = int(s["day"])
 	s["stats"]["rival_races"] = int(s["stats"].get("rival_races", 0)) + 1
 	_say("%s和%s在 %s 外海赛了一程，%s赢了，拿走 %d 金。" % [GameData.HOUSES[ha]["leader"], GameData.HOUSES[hb]["leader"], GameData.port_name(a["port"]), GameData.HOUSES[win]["name"], int(stake)], "rival")
@@ -2688,6 +2710,231 @@ func _monthly() -> void:
 				h["debt"] += need
 				h["gold"] += need
 				_say("金库见底，商会银行自动放贷 %d 金。" % int(need), "bad")
+	_tick_ties()
+
+
+# ================================================================== ties (round 26)
+
+func tie_key(a: String, b: String) -> String:
+	return a + "|" + b if a < b else b + "|" + a
+
+
+## Relationship between two houses, −100 (宿敌) to 100 (盟友); the second defaults to the player.
+func tie(a: String, b: String = "") -> int:
+	if b == "":
+		b = pid()
+	if a == b:
+		return 0
+	return int(s.get("ties", {}).get(tie_key(a, b), 0))
+
+
+func tie_state(a: String, b: String = "") -> String:
+	var v := tie(a, b)
+	if v >= GameData.TIE_ALLY:
+		return "ally"
+	if v <= GameData.TIE_FEUD:
+		return "feud"
+	return "plain"
+
+
+func tie_name(a: String, b: String = "") -> String:
+	var v := tie(a, b)
+	var i := 2
+	if v >= GameData.TIE_ALLY:
+		i = 4
+	elif v >= 15:
+		i = 3
+	elif v <= GameData.TIE_FEUD:
+		i = 0
+	elif v <= -15:
+		i = 1
+	return GameData.TIE_NAMES[i]
+
+
+func set_tie(a: String, b: String, v: int) -> void:
+	if a == b:
+		return
+	if not s.has("ties"):
+		s["ties"] = {}
+	var before := tie_state(a, b)
+	s["ties"][tie_key(a, b)] = clampi(v, -100, 100)
+	var after := tie_state(a, b)
+	if before != after and not house(a)["bankrupt"] and not house(b)["bankrupt"]:
+		_tie_news(a, b, before, after)
+
+
+func add_tie(a: String, b: String, d: int) -> void:
+	set_tie(a, b, tie(a, b) + d)
+
+
+func _tie_news(a: String, b: String, before: String, after: String) -> void:
+	var na: String = GameData.HOUSES[a]["name"]
+	var nb: String = GameData.HOUSES[b]["name"]
+	if a == pid() or b == pid():
+		var on: String = nb if a == pid() else na
+		if after == "ally":
+			s["stats"]["allies"] = int(s["stats"].get("allies", 0)) + 1
+			_say("%s与你结为盟友：他们不再争你的工坊，你开工建灯塔时会出一份钱，灯节上带礼物来，当家在港时愿意交换行情。" % on, "major")
+		elif before == "ally":
+			_say("你与%s的盟约破裂了。" % on, "bad")
+		elif after == "feud":
+			_say("你与%s成了宿敌：收购他们的工坊便宜 %d%%，赛船论道赢他们名声更多；他们也会盯上你的工坊，灯节必来挑战。" % [on, int(roundf((1.0 - GameData.FEUD_BUYOUT) * 100.0))], "bad")
+		elif before == "feud":
+			_say("你与%s的宿怨淡了。" % on, "info")
+	else:
+		if after == "ally":
+			_say("%s与%s结了盟：两家不再互相抢地，还会出钱帮对方建灯塔。" % [na, nb], "rival")
+		elif before == "ally":
+			_say("%s与%s的盟约散了。" % [na, nb], "rival")
+		elif after == "feud":
+			_say("%s与%s翻了脸：两家的船见面就赛，工地也不太平。" % [na, nb], "rival")
+		elif before == "feud":
+			_say("%s与%s的宿怨淡了。" % [na, nb], "rival")
+
+
+## Living houses allied with the given one.
+func allies_of(hid: String) -> Array:
+	var out := []
+	for o in GameData.HOUSE_IDS:
+		if o != hid and not house(o)["bankrupt"] and tie_state(o, hid) == "ally":
+			out.append(o)
+	return out
+
+
+func tie_gift_ok(hid: String) -> Dictionary:
+	if hid == pid() or house(hid)["bankrupt"]:
+		return _fail("没有可送的对象。")
+	var last := int(s.get("tie_gift", {}).get(hid, -999))
+	if int(s["day"]) - last < GameData.TIE_GIFT_GAP:
+		return _fail("刚送过礼，%d 天后再送。" % (GameData.TIE_GIFT_GAP - (int(s["day"]) - last)))
+	if house()["gold"] < GameData.TIE_GIFT_COST:
+		return _fail("需要 %d 金。" % GameData.TIE_GIFT_COST)
+	return {"ok": true}
+
+
+## 赠礼示好: a gift to a rival house, a small step toward an alliance or away from a feud.
+func tie_gift(hid: String) -> Dictionary:
+	var ok := tie_gift_ok(hid)
+	if not ok["ok"]:
+		return ok
+	var h := house()
+	h["gold"] -= GameData.TIE_GIFT_COST
+	h["month_out"] += GameData.TIE_GIFT_COST
+	house(hid)["gold"] += GameData.TIE_GIFT_COST
+	if not s.has("tie_gift"):
+		s["tie_gift"] = {}
+	s["tie_gift"][hid] = int(s["day"])
+	add_tie(pid(), hid, GameData.TIE_GIFT)
+	return {"ok": true, "msg": "%s收下了礼物。与%s的关系：%s（%d）。" % [GameData.HOUSES[hid]["leader"], GameData.HOUSES[hid]["name"], tie_name(hid), tie(hid)]}
+
+
+func propose_ok(hid: String) -> Dictionary:
+	if hid == pid() or house(hid)["bankrupt"]:
+		return _fail("没有可结盟的对象。")
+	if tie_state(hid) == "ally":
+		return _fail("已经是盟友了。")
+	if tie(hid) < GameData.TIE_ASK_MIN:
+		return _fail("关系至少要到 %d 才好开口（现在 %d）。先送礼、喝酒、少跟他们抢。" % [GameData.TIE_ASK_MIN, tie(hid)])
+	var last := int(s.get("tie_ask", {}).get(hid, -999))
+	if int(s["day"]) - last < GameData.TIE_ASK_GAP:
+		return _fail("刚被回绝过，%d 天后再提。" % (GameData.TIE_ASK_GAP - (int(s["day"]) - last)))
+	return {"ok": true}
+
+
+## 提议结盟: succeeds more often the warmer the relationship; a refusal cools it a little.
+func propose_ally(hid: String) -> Dictionary:
+	var ok := propose_ok(hid)
+	if not ok["ok"]:
+		return ok
+	if not s.has("tie_ask"):
+		s["tie_ask"] = {}
+	s["tie_ask"][hid] = int(s["day"])
+	var p := 0.35 + float(tie(hid)) / 100.0
+	var ld: String = GameData.HOUSES[hid]["leader"]
+	if rng.randf() < p:
+		set_tie(pid(), hid, maxi(tie(hid), GameData.TIE_ALLY + 10))
+		return {"ok": true, "msg": "%s答应了。两家结为盟友。" % ld}
+	add_tie(pid(), hid, -5)
+	return {"ok": true, "msg": "%s没有答应：「再看看吧。」关系 −5。" % ld}
+
+
+## 翻脸: declare a feud outright.
+func break_off(hid: String) -> Dictionary:
+	if hid == pid() or house(hid)["bankrupt"]:
+		return _fail("没有可翻脸的对象。")
+	if tie_state(hid) == "feud":
+		return _fail("已经是宿敌了。")
+	set_tie(pid(), hid, mini(tie(hid), GameData.TIE_FEUD - 10))
+	return {"ok": true, "msg": "你当众撕了%s的帖子。从今天起，两家是宿敌。" % GameData.HOUSES[hid]["name"]}
+
+
+## An ally pays a share of a lighthouse stage the other starts (round 26).
+func _ally_chip_in(hid: String, cost: int) -> void:
+	var share := int(float(cost) * GameData.ALLY_LH_SHARE) / 100 * 100
+	if share <= 0:
+		return
+	for o in allies_of(hid):
+		if o == pid():
+			continue   # the player decides their own spending
+		var oh := house(o)
+		if oh["gold"] < float(share) + AiPlayer.WORKING_CAPITAL:
+			continue
+		oh["gold"] -= share
+		oh["month_out"] += share
+		house(hid)["gold"] += share
+		house(hid)["month_in"] += share
+		if hid == pid():
+			_say("%s送来 %s 金，助你建灯塔。" % [GameData.HOUSES[o]["leader"], UiKit.money(share)], "good")
+		else:
+			_say("%s出了 %s 金，帮盟友%s建灯塔。" % [GameData.HOUSES[o]["name"], UiKit.money(share), GameData.HOUSES[hid]["name"]], "rival")
+
+
+## Monthly drift of the relationships: old feelings fade, the two houses trailing the richest draw
+## together, the richest is envied, and feuding houses trip each other up.
+func _tick_ties() -> void:
+	if not s.has("ties"):
+		s["ties"] = {}
+	var alive := GameData.HOUSE_IDS.filter(func(x): return not house(x)["bankrupt"])
+	# fade toward 0
+	for k in s["ties"]:
+		var v := int(s["ties"][k])
+		if v != 0:
+			s["ties"][k] = v - signi(v) * mini(GameData.TIE_DECAY, absi(v))
+	if alive.size() >= 3:
+		var leader: String = alive[0]
+		for hid in alive:
+			if net_worth(hid) > net_worth(leader):
+				leader = hid
+		var rest: Array = alive.filter(func(x): return x != leader)
+		var a: String = rest[0]
+		var b: String = rest[1]
+		var v := tie(a, b) + GameData.TIE_LEADER_DRIFT
+		if a == pid() or b == pid():
+			v = mini(v, maxi(tie(a, b), GameData.TIE_DRIFT_CAP))
+		set_tie(a, b, v)
+		for o in rest:
+			var w := tie(leader, o) - GameData.TIE_ENVY
+			if leader == pid() or o == pid():
+				w = maxi(w, mini(tie(leader, o), -GameData.TIE_DRIFT_CAP))
+			set_tie(leader, o, w)
+	# feuding houses (not the player) trip each other up
+	for i in alive.size():
+		for j in range(i + 1, alive.size()):
+			var a2: String = alive[i]
+			var b2: String = alive[j]
+			if a2 == pid() or b2 == pid() or tie_state(a2, b2) != "feud" or rng.randf() >= GameData.FEUD_INCIDENT:
+				continue
+			var hitter: String = a2 if house(a2)["gold"] >= house(b2)["gold"] else b2
+			var target: String = b2 if hitter == a2 else a2
+			var lh: Dictionary = house(target)["lh"]
+			if lh["building"]:
+				lh["end"] = int(lh["end"]) + GameData.FEUD_DELAY_DAYS
+				_say("%s买通了工匠，%s的灯塔工地停了 %d 天。" % [GameData.HOUSES[hitter]["name"], GameData.HOUSES[target]["name"], GameData.FEUD_DELAY_DAYS], "rival")
+			else:
+				for sh in _ships_of(target):
+					if docked(sh):
+						sh["idle_until"] = int(s["day"]) + GameData.RIVAL_DELAY_DAYS
+				_say("%s买通了港务，%s的船被拦在泊位里查了 %d 天。" % [GameData.HOUSES[hitter]["name"], GameData.HOUSES[target]["name"], GameData.RIVAL_DELAY_DAYS], "rival")
 
 
 func _tick_crisis() -> void:
@@ -2772,6 +3019,10 @@ func from_json(text: String) -> bool:
 		s[k] = int(s[k])
 	if not s.has("hints"):
 		s["hints"] = {}
+	if not s.has("ties"):
+		s["ties"] = {}
+	for k in s["ties"]:
+		s["ties"][k] = int(s["ties"][k])
 	for k in s.get("milestones", {}):
 		s["milestones"][k] = int(s["milestones"][k])
 	if s["crown"] != null:
