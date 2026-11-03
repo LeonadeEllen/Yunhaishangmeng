@@ -147,7 +147,7 @@ static func maybe_trigger(sim: Sim) -> void:
 				if hid == sim.pid() or sim.house(hid)["bankrupt"]:
 					continue
 				for sh in sim._ships_of(hid):
-					if sh["port"] == fl0["port"]:
+					if sim.on_quay(sh, fl0["port"]):
 						here.append(hid)
 						break
 			if not here.is_empty() and sim.rng.randf() < GameData.RIVAL_MEET:

@@ -1251,9 +1251,37 @@ func test_ties() -> void:
 	sim3.set_tie(sim3.pid(), "tower", GameData.TIE_DRIFT_CAP)
 	sim3._tick_ties()
 	check(sim3.tie("tower") == GameData.TIE_DRIFT_CAP and sim3.tie("iron", "tower") == GameData.TIE_LEADER_DRIFT - GameData.TIE_DECAY - GameData.TIE_ENVY, "drift alone never allies the player; old feelings fade by %d a month and the leader is envied" % GameData.TIE_DECAY)
+	# round 30: an alliance with the player never lapses by drift; a feud that fades makes the news
+	sim3.set_tie(sim3.pid(), "iron", GameData.TIE_ALLY + 1)
+	sim3.set_tie(sim3.pid(), "tower", GameData.TIE_FEUD)
+	sim3.house("iron")["gold"] = 1.0e9
+	sim3.house()["gold"] = 1000.0
+	for i in 6:
+		sim3._tick_ties()
+	check(sim3.tie_state("iron") == "ally" and sim3.tie("iron") == GameData.TIE_ALLY, "drift and envy cannot break the player's alliance (%d)" % sim3.tie("iron"))
+	check(sim3.tie_state("tower") == "plain" and sim3.s["log"].any(func(l): return str(l[1]).contains("宿怨淡了")), "a feud fades through the news")
+	sim3.add_tie(sim3.pid(), "iron", -GameData.TIE_RACE)
+	check(sim3.tie_state("iron") == "plain", "a lost race still can")
 	# save round-trip
 	var sim4 := Sim.new()
 	check(sim4.from_json(sim.to_json()) and sim4.tie("iron") == sim.tie("iron") and typeof(sim4.s["ties"].values()[0]) == TYPE_INT and sim4.tie_state("tower") == "ally", "relationships survive a save")
+	# round 30: a rival captain who loaded here and cast off this morning can still be met on the quay
+	var sim5 := Sim.new()
+	sim5.new_game(30)
+	sim5.s["story"] = 3
+	var rs: Dictionary = sim5.ships_of("iron")[0]
+	var dest := "muxia"
+	rs["from"] = rs["port"]
+	rs["to"] = dest
+	rs["depart"] = int(sim5.s["day"])
+	rs["arrive"] = int(sim5.s["day"]) + 1
+	sim5.s["event"] = null
+	sim5.advance_day()
+	check(not sim5.docked(rs) and rs["from"] == dest and int(rs["depart"]) == int(sim5.s["day"]), "an arriving rival ship trades and sails on the same day")
+	check(sim5.on_quay(rs, dest) and not sim5.on_quay(rs, rs["to"]), "but its captain counts as on the quay it left today")
+	sim5.s["event"] = null
+	sim5.advance_day()
+	check(not sim5.on_quay(rs, dest), "and not the day after")
 
 
 func test_allies() -> void:

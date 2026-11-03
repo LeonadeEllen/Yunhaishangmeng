@@ -286,6 +286,15 @@ func flagship() -> Dictionary:
 	return all[0] if not all.is_empty() else {}
 
 
+## True when a rival captain can be met on this quay today: the ship is docked here, or it
+## loaded here and cast off this very morning (round 30). Rival ships sail on the day they
+## arrive, so without the second case they were almost never found in port.
+func on_quay(sh: Dictionary, port: String) -> bool:
+	if docked(sh):
+		return sh["port"] == port
+	return sh["from"] == port and int(sh["depart"]) == int(s["day"])
+
+
 func docked(sh: Dictionary) -> bool:
 	return sh["to"] == ""
 
@@ -2900,6 +2909,9 @@ func set_tie(a: String, b: String, v: int) -> void:
 	if not s.has("ties"):
 		s["ties"] = {}
 	var before := tie_state(a, b)
+	# an alliance with the player only ends through what people do, never by drifting (round 30)
+	if before == "ally" and (a == pid() or b == pid()) and _drifting:
+		v = maxi(v, GameData.TIE_ALLY)
 	s["ties"][tie_key(a, b)] = clampi(v, -100, 100)
 	var after := tie_state(a, b)
 	if before != after and not house(a)["bankrupt"] and not house(b)["bankrupt"]:
@@ -3160,15 +3172,25 @@ func _loan_lost(sh: Dictionary) -> void:
 
 ## Monthly drift of the relationships: old feelings fade, the two houses trailing the richest draw
 ## together, the richest is envied, and feuding houses trip each other up.
+var _drifting := false
+
+
 func _tick_ties() -> void:
 	if not s.has("ties"):
 		s["ties"] = {}
+	_drifting = true
+	_tick_ties_drift()
+	_drifting = false
+
+
+func _tick_ties_drift() -> void:
 	var alive := GameData.HOUSE_IDS.filter(func(x): return not house(x)["bankrupt"])
-	# fade toward 0
-	for k in s["ties"]:
+	# fade toward 0 (through set_tie, so a pact that lapses makes the news)
+	for k in s["ties"].keys():
 		var v := int(s["ties"][k])
 		if v != 0:
-			s["ties"][k] = v - signi(v) * mini(GameData.TIE_DECAY, absi(v))
+			var ab: PackedStringArray = k.split("|")
+			set_tie(ab[0], ab[1], v - signi(v) * mini(GameData.TIE_DECAY, absi(v)))
 	if alive.size() >= 3:
 		var leader: String = alive[0]
 		for hid in alive:

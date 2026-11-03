@@ -271,7 +271,7 @@ const HQ := [
 	{"name": "盟会总馆", "cost": 150000, "crew": 3, "rep": 60, "wage": 0.8, "ships": 1, "desc": "伙伴上限 +3，每月名声 +60，伙伴月薪 −20%，船队上限 +1。"},
 ]
 const HQ_REP := [0, 2, 3, 4]        # reputation level needed to build each HQ level
-const RIVAL_MEET := 0.45            # chance of a rival captain hailing you when you dock beside their ship
+const RIVAL_MEET := 0.6             # chance of a rival captain hailing you when you dock beside their ship
 const RIVAL_MEET_GAP := 45          # days between such meetings
 const RIVAL_DELAY_COST := 1200
 const RIVAL_DELAY_DAYS := 6
