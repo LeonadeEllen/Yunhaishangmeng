@@ -1378,6 +1378,16 @@ func test_grand() -> void:
 	sim.s["day"] = int(sim.grand_state("beacons")["end"])
 	sim._tick_grand()
 	check(sim.grand_builder("beacons") == me and sim.house()["rep"] == r0 + int(GameData.GRAND[0]["prize"]) and str(sim.s["log"][-1][1]).contains("落成"), "it completes on its day with a reputation prize")
+	check(sim.s["grand_show"]["id"] == "beacons" and sim.s["grand_show"]["hid"] == me, "the ceremony is queued for the UI")
+	var lines_ok := true
+	for gw in GameData.GRAND:
+		if not GameData.GRAND_ART.has(gw["id"]):
+			lines_ok = false
+		for hid in GameData.HOUSE_IDS:
+			var ln: Dictionary = GameData.GRAND_LINES.get(gw["id"], {}).get(hid, {})
+			if str(ln.get("built", "")).length() < 8 or str(ln.get("other", "")).length() < 8:
+				lines_ok = false
+	check(lines_ok, "every work has art and a line from every leader, as builder and as onlooker")
 	sim._tick_milestones()
 	check(sim.milestone_done("grand"), "the first grand work is a milestone")
 	check(sim.grand_pirate(me) == GameData.GRAND_PIRATE["mine"] and sim.grand_pirate("iron") == GameData.GRAND_PIRATE["other"], "pirates are rarer for everyone, rarest for the builder")

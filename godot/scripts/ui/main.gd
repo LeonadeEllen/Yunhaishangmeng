@@ -555,6 +555,11 @@ func _after_day() -> bool:
 		if sim.s["crown"]["hid"] == sim.pid():
 			_crown_celebration()
 			stop = true
+	if sim.s.get("grand_show") != null and not _modal_open:
+		var gs: Dictionary = sim.s["grand_show"]
+		sim.s["grand_show"] = null
+		_grand_ceremony(gs)
+		stop = true
 	if sim.s["day"] % 90 == 0 and sim.s["day"] > 0:
 		var season: String = GameData.SEASONS[(int(sim.s["day"]) % 360) / 90]
 		_toast("入%s。%s" % [season, GameData.date_text(sim.s["day"]).split(" · ")[0]], "info")
@@ -2474,6 +2479,36 @@ func _lighthouse_cutscene(stage: int) -> void:
 		_fx_tweens.append(pulse)
 		pulse.tween_property(glow, "scale", Vector2(1.0, 1.0), 1.1).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 		pulse.tween_property(glow, "scale", Vector2(1.15, 1.15), 1.1).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT))
+
+
+## A grand work is finished: the scene, what it changes, and what the three leaders say (round 29).
+func _grand_ceremony(gs: Dictionary) -> void:
+	_set_speed(0)
+	sfx("gong")
+	var gw := Sim.grand_def(gs["id"])
+	var hid: String = gs["hid"]
+	var mine := hid == sim.pid()
+	var lines := ["%s 的%s落成了。%s" % [GameData.HOUSES[hid]["name"], gw["name"], gw["desc"]],
+		"%s名声 +%d。" % ["你的" if mine else GameData.HOUSES[hid]["name"], int(gw["prize"])]]
+	var v := _modal("%s落成" % gw["name"], GameData.GRAND_ART.get(gs["id"], ""), lines, [["继续", func(): _close_modal(); if sim.s["event"] != null: _show_event()]], 700)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 6)
+	var said: Dictionary = GameData.GRAND_LINES[gs["id"]]
+	var order := [hid]
+	for o in GameData.HOUSE_IDS:
+		if o != hid and not sim.house(o)["bankrupt"]:
+			order.append(o)
+	for o in order:
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		row.add_child(UiKit.icon(UiKit.sprite("emblems", GameData.HOUSES[o]["emblem"]), 26))
+		var l := UiKit.label(said[o]["built" if o == hid else "other"], 14, UiKit.INK if o == hid else Color("6b5a3e"))
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(l)
+		box.add_child(row)
+	v.add_child(box)
+	v.move_child(box, v.get_child_count() - 2)
 
 
 func _crown_celebration() -> void:

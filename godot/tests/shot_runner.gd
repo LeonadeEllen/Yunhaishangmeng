@@ -366,6 +366,11 @@ func run(m: Control) -> void:
 	await _wait(0.3)
 	await _shot("43_grand")
 	sc.scroll_vertical = 0
+	# round 29: the ceremony when a grand work is finished
+	main._grand_ceremony({"id": "skylane", "hid": main.sim.pid(), "day": int(main.sim.s["day"])})
+	await _wait(0.4)
+	await _shot("44_grand_done")
+	main._close_modal()
 	main.sim.s["event"] = null
 	EventBook.festival_challenge(main.sim, "iron")
 	main._show_event()

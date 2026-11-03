@@ -2809,6 +2809,7 @@ func _tick_grand() -> void:
 		var hid: String = g["hid"]
 		add_rep(hid, int(gw["prize"]))
 		s["stats"]["grand"] = int(s["stats"].get("grand", 0)) + 1
+		s["grand_show"] = {"id": k, "hid": hid, "day": int(s["day"])}   # the ceremony the UI shows (round 29)
 		_say("%s落成，%s名声 +%d。%s" % [gw["name"], GameData.HOUSES[hid]["name"], int(gw["prize"]), gw["desc"]], "good" if hid == pid() else "major")
 
 
