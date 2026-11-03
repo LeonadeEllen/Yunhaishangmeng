@@ -217,6 +217,8 @@ func _show_help() -> void:
 		"· 伙伴：酒馆、船坞、行会里能遇到 12 位各有专长的人物，付安家费招入商会，每月发薪。安排岗位（航海长、账房、炮术长、接舷队长、船长）吃他们的能力加成；一起航行、打赢云盗、送礼都涨好感，好感到了会触发三章个人剧情，走完专长更强。",
 		"· 时间：空格暂停，1/2/3 切换速度。旗舰抵港时自动暂停。",
 		"· 对手：灯油行会靠跑商、铁誓舰团靠船队（船便宜、航速快）、白塔议士靠产业（工坊便宜、产地多产）。云盗对谁都下手，对手的船也会被劫。",
+		"· 相遇：旗舰停进对手船所在的港口时，对手的当家可能来打招呼：和韦朔赛船赌金、和殷望舒当众论道赌名声、向他们买地契和图纸、买通港务拖住他们的船，或者只是喝一杯。伙伴之间好感够高也会在港口发生他们自己的故事，进城时还能在街上碰到他们。",
+		"· 会馆：在老家的商馆页扩建商会总部（三级）：伙伴上限、每月名声、伙伴薪水折扣，最高一级船队上限 +1。",
 		"· 灯塔：三层灯塔是云海盟主的象征，不建也可以一直玩下去。金币为负超过 30 天会破产。",
 	], [["明白了", func(): _close_modal()]])
 
@@ -1271,6 +1273,21 @@ func _tab_post(here: bool) -> void:
 	var hid := sim.pid()
 	var p: Dictionary = GameData.PORTS[_port]
 	var has_post := Industry.has_wh(sim, _port, hid)
+	if _port == GameData.HOUSES[hid]["home"]:
+		# the house's headquarters (round 13)
+		var lvl := sim.hq_level()
+		var cur: Dictionary = GameData.HQ[lvl]
+		side_body.add_child(UiKit.label("商会总部 · %s" % cur["name"], 18, UiKit.INK, true))
+		side_body.add_child(UiKit.para(cur["desc"] if lvl > 0 else "起家的小院子。会馆越大，能带的伙伴越多，每月还会为商会添名声。", 13, UiKit.MUTED))
+		if lvl + 1 < GameData.HQ.size():
+			var nxt: Dictionary = GameData.HQ[lvl + 1]
+			var ok := sim.hq_ok()
+			var hb := UiKit.button("扩建为「%s」· %s 金" % [nxt["name"], UiKit.money(nxt["cost"])], func(): _act(sim.upgrade_hq()); _refresh_side())
+			hb.disabled = not ok["ok"]
+			hb.tooltip_text = ("%s（名声「%s」）" % [nxt["desc"], GameData.REP_NAMES[int(GameData.HQ_REP[lvl + 1]) - 1]]) if ok["ok"] else ("%s — %s" % [nxt["desc"], ok["msg"]])
+			side_body.add_child(hb)
+			side_body.add_child(UiKit.label(nxt["desc"], 12, UiKit.JADE))
+		side_body.add_child(HSeparator.new())
 	if not has_post:
 		side_body.add_child(UiKit.label("商馆", 18, UiKit.INK, true))
 		side_body.add_child(UiKit.para("商馆是你在这座城的据点：有仓库可以囤货，工坊的原料和产出都放在这里。开设需要名声「船东」（2 级）和 %d 金，仓库按容量付租金。" % GameData.WH_OPEN, 14, UiKit.MUTED))
@@ -1806,9 +1823,19 @@ func _modal(title: String, art: String, lines: Array, buttons: Array, width: int
 	v.add_child(UiKit.label(title, 26, UiKit.INK, true))
 	for line in lines:
 		v.add_child(UiKit.para(line, 17))
-	var row := HBoxContainer.new()
-	row.alignment = BoxContainer.ALIGNMENT_END
-	row.add_theme_constant_override("separation", 10)
+	var row: Container
+	if buttons.size() > 3:
+		# many choices wrap onto a second line instead of squeezing past the screen edge
+		var flow := HFlowContainer.new()
+		flow.alignment = FlowContainer.ALIGNMENT_END
+		flow.add_theme_constant_override("h_separation", 10)
+		flow.add_theme_constant_override("v_separation", 8)
+		row = flow
+	else:
+		var hb := HBoxContainer.new()
+		hb.alignment = BoxContainer.ALIGNMENT_END
+		hb.add_theme_constant_override("separation", 10)
+		row = hb
 	for b in buttons:
 		row.add_child(UiKit.button(b[0], b[1], b.size() > 2 and b[2]))
 	v.add_child(row)
@@ -1887,7 +1914,7 @@ func _char_card(cid: String, where: String) -> Control:
 
 func _show_crew() -> void:
 	var v := _modal("伙伴 · %d / %d" % [sim.crew().size(), sim.crew_cap()], "", [
-		"岗位加成来自各人的能力；送礼（%d 金，每月一次）、一起航行、打赢云盗、完成委托都涨好感，好感到 %d / %d / %d 会在港口触发个人剧情，走完三章专长更强。每月薪水合计 %d 金。" % [Characters.GIFT_COST, Characters.CHAPTER_AFF[0], Characters.CHAPTER_AFF[1], Characters.CHAPTER_AFF[2], sim.crew_wages()],
+		"岗位加成来自各人的能力；送礼（%d 金，每月一次）、一起航行、打赢云盗、完成委托都涨好感，好感到 %d / %d / %d 会在港口触发个人剧情，走完三章专长更强；两位好感都过 %d 的伙伴之间还会有他们自己的故事。每月薪水合计 %d 金%s。" % [Characters.GIFT_COST, Characters.CHAPTER_AFF[0], Characters.CHAPTER_AFF[1], Characters.CHAPTER_AFF[2], Characters.PAIR_AFF, sim.crew_wages(), ("（会馆折扣 %d%%）" % int(round((1.0 - float(GameData.HQ[sim.hq_level()]["wage"])) * 100.0))) if sim.hq_level() >= 2 else ""],
 	], [["关闭", func(): _close_modal()]], 760)
 	var list := VBoxContainer.new()
 	list.add_theme_constant_override("separation", 6)

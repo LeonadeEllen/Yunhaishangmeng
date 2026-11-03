@@ -129,6 +129,17 @@ func _layout() -> void:
 	for i in 4:
 		var np := Vector2(r.randf_range(140, size.x - 140), r.randf_range(160, size.y - 170))
 		_npcs.append({"p": np, "v": Vector2.ZERO, "t": r.randf_range(0.0, 2.0), "line": _rumour(r) if i == 0 else lines[i], "hue": r.randf()})
+	# a few of your companions have come ashore too (round 13)
+	var crew_ids: Array = sim.crew().keys()
+	var cr := RandomNumberGenerator.new()
+	cr.seed = int(sim.s["day"]) * 31 + int(p["island"])
+	for i in mini(3, crew_ids.size()):
+		var cid: String = crew_ids[cr.randi_range(0, crew_ids.size() - 1)]
+		crew_ids.erase(cid)
+		var banter: Array = Characters.BANTER.get(cid, ["……"])
+		var cp := Vector2(cr.randf_range(180, size.x - 180), cr.randf_range(180, size.y - 180))
+		_npcs.append({"p": cp, "v": Vector2.ZERO, "t": cr.randf_range(0.0, 2.0), "line": banter[cr.randi_range(0, banter.size() - 1)],
+			"hue": fposmod(float(cid.hash() % 1000) / 1000.0, 1.0), "cid": cid})
 
 
 func _make_building(kind: String, pos: Vector2) -> Dictionary:
@@ -329,16 +340,26 @@ func _draw() -> void:
 		if it.has("b"):
 			_draw_building(it["b"], font)
 		elif it.has("n"):
-			_draw_person(it["n"]["p"], Color.from_hsv(it["n"]["hue"], 0.35, 0.6), Color(0.85, 0.75, 0.6), false, 1.0)
+			var is_crew: bool = it["n"].has("cid")
+			_draw_person(it["n"]["p"], Color.from_hsv(it["n"]["hue"], 0.6 if is_crew else 0.35, 0.7 if is_crew else 0.6), Color(0.9, 0.8, 0.66) if is_crew else Color(0.85, 0.75, 0.6), it["n"]["v"] != Vector2.ZERO and is_crew, 1.0)
 		else:
 			var col: Color = GameData.HOUSES[sim.pid()]["color"]
 			_draw_person(hero_pos, col, Color(0.95, 0.85, 0.7), _moving, _facing)
 	for b in _buildings:
 		_draw_label(b, font)
+	# companions wear a name tag
+	for n in _npcs:
+		if n.has("cid"):
+			var nm: String = Characters.name_of(n["cid"])
+			var nw := font.get_string_size(nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
+			var tp: Vector2 = n["p"] + Vector2(-nw * 0.5 - 5, -62)
+			draw_rect(Rect2(tp, Vector2(nw + 10, 17)), Color(UiKit.JADE, 0.9))
+			draw_string(font, tp + Vector2(5, 13), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color.WHITE)
 	# rumours
 	for n in _npcs:
 		if hero_pos.distance_to(n["p"]) < 64:
-			_bubble(n["p"] + Vector2(0, -52), n["line"] % GameData.HOUSES[sim.pid()]["name"] if "%s" in n["line"] else n["line"], font)
+			var line: String = n["line"] % GameData.HOUSES[sim.pid()]["name"] if "%s" in n["line"] else n["line"]
+			_bubble(n["p"] + Vector2(0, -52 - (14 if n.has("cid") else 0)), line, font)
 	# prompt
 	if _near != "":
 		_bubble(hero_pos + Vector2(0, -58), "按 E 或点击 进入%s" % kind_name(_near), font, true)

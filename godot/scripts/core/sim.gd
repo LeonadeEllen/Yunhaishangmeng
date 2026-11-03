@@ -139,7 +139,42 @@ func has_bp(good: String, hid: String = "") -> bool:
 func max_ships(hid: String = "") -> int:
 	if hid == "":
 		hid = pid()
-	return mini(GameData.MAX_SHIPS, GameData.REP_MAX_SHIPS[rep_level(hid) - 1])
+	var extra: int = GameData.HQ[hq_level(hid)]["ships"]
+	return mini(GameData.MAX_SHIPS + extra, GameData.REP_MAX_SHIPS[rep_level(hid) - 1] + extra)
+
+
+# ------------------------------------------------------------------ headquarters (round 13)
+func hq_level(hid: String = "") -> int:
+	if hid == "":
+		hid = pid()
+	return int(house(hid).get("hq", 0))
+
+
+func hq_ok() -> Dictionary:
+	var lvl := hq_level()
+	if lvl + 1 >= GameData.HQ.size():
+		return _fail("会馆已是最高一级。")
+	var nxt: Dictionary = GameData.HQ[lvl + 1]
+	var fl := flagship()
+	if fl.is_empty() or not docked(fl) or fl["port"] != GameData.HOUSES[pid()]["home"]:
+		return _fail("旗舰要停在本会的老家 %s。" % GameData.port_name(GameData.HOUSES[pid()]["home"]))
+	if rep_level() < int(GameData.HQ_REP[lvl + 1]):
+		return _fail("名声要到「%s」。" % GameData.REP_NAMES[int(GameData.HQ_REP[lvl + 1]) - 1])
+	if house()["gold"] < float(nxt["cost"]):
+		return _fail("需要 %d 金。" % int(nxt["cost"]))
+	return {"ok": true, "msg": ""}
+
+
+func upgrade_hq() -> Dictionary:
+	var ok := hq_ok()
+	if not ok["ok"]:
+		return ok
+	var nxt: Dictionary = GameData.HQ[hq_level() + 1]
+	house()["gold"] -= float(nxt["cost"])
+	house()["month_out"] += float(nxt["cost"])
+	house()["hq"] = hq_level() + 1
+	_say("「%s」落成。%s" % [nxt["name"], nxt["desc"]], "major")
+	return {"ok": true, "msg": "「%s」落成。" % nxt["name"]}
 
 
 func new_game(seed_value: int = 0, player: String = "lamp", difficulty: int = 1) -> void:
@@ -1291,13 +1326,13 @@ func crew() -> Dictionary:
 
 
 func crew_cap() -> int:
-	return Characters.CREW_CAP[clampi(rep_level() - 1, 0, 5)]
+	return Characters.CREW_CAP[clampi(rep_level() - 1, 0, 5)] + int(GameData.HQ[hq_level()]["crew"])
 
 
 func crew_wages() -> int:
 	var w := 0
 	for cid in s["crew"]:
-		w += int(Characters.CHARS[cid]["wage"])
+		w += int(round(float(Characters.CHARS[cid]["wage"]) * float(GameData.HQ[hq_level()]["wage"])))
 	return w
 
 
@@ -1494,6 +1529,14 @@ func _tick_crew() -> void:
 		var ch := int(m["chapter"])
 		if ch < 3 and int(m["aff"]) >= Characters.CHAPTER_AFF[ch]:
 			EventBook.open_chapter(self, cid, ch)
+			return
+	# two companions who both like you well enough share a scene (round 13)
+	for i in Characters.PAIRS.size():
+		var pr: Dictionary = Characters.PAIRS[i]
+		if s.get("pairs_done", {}).has(str(i)) or not s["crew"].has(pr["a"]) or not s["crew"].has(pr["b"]):
+			continue
+		if int(s["crew"][pr["a"]]["aff"]) >= Characters.PAIR_AFF and int(s["crew"][pr["b"]]["aff"]) >= Characters.PAIR_AFF:
+			EventBook.open_pair(self, i)
 			return
 
 
@@ -2211,6 +2254,8 @@ func _monthly() -> void:
 		else:
 			_say("月结：上月净收支 %+d 金（固定开支 %d）。" % [int(h["last_net"]), int(cost + interest)], "month")
 			_crew_monthly()
+			if hq_level() > 0:
+				add_rep(pid(), int(GameData.HQ[hq_level()]["rep"]))
 		if hid == pid() and h["gold"] < 0.0:
 			# automatic emergency loan before a crisis starts
 			var room: float = loan_limit() - h["debt"]
@@ -2372,4 +2417,7 @@ func from_json(text: String) -> bool:
 		lh["end"] = int(lh["end"])
 		s["houses"][hid]["crisis"] = int(s["houses"][hid]["crisis"])
 		s["houses"][hid]["rep"] = int(s["houses"][hid]["rep"])
+		s["houses"][hid]["hq"] = int(s["houses"][hid].get("hq", 0))
+	if s.has("rival_met"):
+		s["rival_met"] = int(s["rival_met"])
 	return true

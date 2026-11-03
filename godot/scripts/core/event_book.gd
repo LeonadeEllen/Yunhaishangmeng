@@ -139,6 +139,21 @@ static func maybe_trigger(sim: Sim) -> void:
 			return
 	if s.has("arrived"):
 		s.erase("arrived")
+		# a rival captain docked beside you may hail you (round 13)
+		var fl0 := sim.flagship()
+		if not fl0.is_empty() and sim.docked(fl0) and int(s["day"]) - int(s.get("rival_met", -999)) >= GameData.RIVAL_MEET_GAP:
+			var here := []
+			for hid in GameData.HOUSE_IDS:
+				if hid == sim.pid() or sim.house(hid)["bankrupt"]:
+					continue
+				for sh in sim._ships_of(hid):
+					if sh["port"] == fl0["port"]:
+						here.append(hid)
+						break
+			if not here.is_empty() and sim.rng.randf() < GameData.RIVAL_MEET:
+				s["rival_met"] = int(s["day"])
+				rival_meeting(sim, here[sim.rng.randi() % here.size()])
+				return
 		if sim.rng.randf() < 0.14:
 			var fl := sim.flagship()
 			var pool: Array = RANDOM
@@ -153,6 +168,11 @@ static func _open(sim: Sim, ev: Dictionary) -> void:
 
 
 static func _find(id: String) -> Dictionary:
+	if id.begins_with("pair:"):
+		var idx := int(id.split(":")[1])
+		var pr: Dictionary = Characters.PAIRS[idx]
+		return {"id": id, "title": pr["title"], "text": pr["text"], "art": "", "pair": idx,
+			"choices": pr["choices"].map(func(c): return {"label": c["label"], "effects": c["fx"]})}
 	if id.begins_with("char:"):
 		var parts := id.split(":")
 		var ch: Dictionary = Characters.CHARS[parts[1]]["story"][int(parts[2])]
@@ -173,11 +193,60 @@ static func open_chapter(sim: Sim, cid: String, chapter: int) -> void:
 		"choices": ch["choices"].map(func(x): return {"label": x["label"]})}
 
 
+## A scene between two companions (index into Characters.PAIRS).
+static func open_pair(sim: Sim, idx: int) -> void:
+	var pr: Dictionary = Characters.PAIRS[idx]
+	sim.s["event"] = {"id": "pair:%d" % idx, "title": "%s与%s · %s" % [Characters.name_of(pr["a"]), Characters.name_of(pr["b"]), pr["title"]],
+		"text": pr["text"], "art": "story_loyalty", "choices": pr["choices"].map(func(x): return {"label": x["label"]})}
+
+
+## A rival captain hails you on the quay (round 13). The choices depend on what the rival owns, so
+## their effects travel inside the event itself instead of a static table.
+static func rival_meeting(sim: Sim, hid: String) -> void:
+	var hh: Dictionary = GameData.HOUSES[hid]
+	var me: String = GameData.HOUSES[sim.pid()]["leader"]
+	var fl := sim.flagship()
+	var port: String = fl["port"]
+	var ship_name := "飞艇"
+	for sh in sim._ships_of(hid):
+		if sh["port"] == port:
+			ship_name = sh["name"]
+			break
+	var gold: float = sim.house()["gold"]
+	var stake := int(clampf(gold * 0.1, 1000.0, 8000.0)) / 100 * 100
+	var choices := []
+	var text := ""
+	if hid == "iron":
+		text = "码头上停着铁誓舰团的%s。韦朔靠在船舷上冲你喊：「%s！敢不敢赛一程？从这里到灯标，先到的拿走赌金。」" % [ship_name, me]
+		choices.append({"label": "赛船：赌 %s 金" % UiKit.money(stake), "effects": {"race": {"hid": hid, "stake": stake}}})
+	else:
+		text = "白塔议士的%s泊在隔壁泊位。殷望舒撑着伞走过来，像在谈天气一样问起你的账目：「%s，当众论一论生意之道？输的那位，名声要折一些。」" % [ship_name, me]
+		choices.append({"label": "论道：赢了名声 +80，输了 −30", "effects": {"debate": {"hid": hid}}})
+	# a blueprint they own and you do not (tier 1 deeds and tier 2 craft blueprints only)
+	var bp := ""
+	for g in sim.house(hid)["bp"]:
+		if not sim.has_bp(g) and GameData.tier(g) <= 2:
+			bp = g
+			break
+	if bp != "":
+		var cost := int(float(GameData.DEED_COST) * 1.5) if GameData.tier(bp) == 1 else int(float(GameData.CRAFT_BP_COST) * 1.25)
+		choices.append({"label": "买%s的%s%s（%s 金）" % ["他" if hid == "iron" else "她", GameData.good_name(bp), "地契" if GameData.tier(bp) == 1 else "图纸", UiKit.money(cost)],
+			"effects": {"buy_bp": {"hid": hid, "good": bp, "cost": cost}}})
+	choices.append({"label": "买通港务，拖住%s的船 %d 天（%s 金，可能败露）" % [hh["name"], GameData.RIVAL_DELAY_DAYS, UiKit.money(GameData.RIVAL_DELAY_COST)],
+		"effects": {"delay_rival": {"hid": hid, "port": port}}})
+	choices.append({"label": "请%s喝一杯（300 金，本城友好度 +40）" % ("他" if hid == "iron" else "她"),
+		"effects": {"gold": -300, "friend": 40, "say": ("韦朔酒量惊人，临走拍着你的肩说下次再赛。" if hid == "iron" else "殷望舒只喝了半杯茶，却把本城哪位官员好说话都告诉了你。")}})
+	choices.append({"label": "点头致意，各忙各的", "effects": {}})
+	sim.s["event"] = {"id": "rival:%s" % hid, "title": "%s · %s在港" % [hh["leader"], hh["name"]], "text": text, "art": "events/14", "choices": choices}
+
+
 static func resolve(sim: Sim, choice: int) -> Dictionary:
 	var cur = sim.s["event"]
 	if cur == null:
 		return {"ok": false, "msg": "没有待处理的事件。"}
 	var ev := _find(cur["id"])
+	if ev.is_empty():
+		ev = cur   # choices carry their own effects (rival meetings)
 	var c: Dictionary = ev["choices"][clampi(choice, 0, ev["choices"].size() - 1)]
 	var fx: Dictionary = c["effects"]
 	var h := sim.house()
@@ -247,6 +316,71 @@ static func resolve(sim: Sim, choice: int) -> Dictionary:
 		if fx.has("spec_up"):
 			m["spec_lvl"] = 2
 			msgs.append("%s的专长「%s」更上一层。" % [Characters.name_of(ev["cid"]), Characters.CHARS[ev["cid"]]["spec_name"]])
+	if fx.has("rep"):
+		if int(fx["rep"]) > 0:
+			sim.add_rep(sim.pid(), int(fx["rep"]))
+		else:
+			h["rep"] = maxi(0, int(h["rep"]) + int(fx["rep"]))
+	if ev.has("pair"):
+		var pr: Dictionary = Characters.PAIRS[int(ev["pair"])]
+		sim.add_affinity(pr["a"], int(fx.get("aff_a", 0)))
+		sim.add_affinity(pr["b"], int(fx.get("aff_b", 0)))
+		if not sim.s.has("pairs_done"):
+			sim.s["pairs_done"] = {}
+		sim.s["pairs_done"][str(int(ev["pair"]))] = true
+	if fx.has("race"):
+		var rc: Dictionary = fx["race"]
+		var rival := sim.house(rc["hid"])
+		var stake := float(rc["stake"])
+		var p := clampf(0.3 + 0.05 * float(sim.hero_abil("sail")) + 0.03 * float(sim.post_level("nav")) + (sim.speed_mult(fl) - 1.0) * 1.5, 0.2, 0.85)
+		if sim.rng.randf() < p:
+			h["gold"] += stake
+			h["month_in"] += stake
+			rival["gold"] -= stake
+			sim.add_rep(sim.pid(), 40)
+			sim.s["stats"]["races"] = int(sim.s["stats"].get("races", 0)) + 1
+			msgs.append("你的旗舰先一个船身越过了灯标。韦朔隔着云雾骂了一句，把 %s 金赌金扔了过来。名声 +40。" % UiKit.money(stake))
+		else:
+			h["gold"] -= stake
+			h["month_out"] += stake
+			rival["gold"] += stake
+			msgs.append("韦朔的船像一道铁箭。他收起 %s 金赌金，笑得很大声。" % UiKit.money(stake))
+	if fx.has("debate"):
+		var rival_lvl := sim.rep_level(fx["debate"]["hid"])
+		var p2 := clampf(0.3 + 0.06 * float(sim.hero_abil("charm")) + 0.05 * float(sim.rep_level() - rival_lvl), 0.2, 0.85)
+		if sim.rng.randf() < p2:
+			sim.add_rep(sim.pid(), 80)
+			msgs.append("殷望舒合上扇子：「受教了。」码头上的人记住了你的名字。名声 +80。")
+		else:
+			h["rep"] = maxi(0, int(h["rep"]) - 30)
+			msgs.append("你被她的数字绕得说不出话，围观的人散得很快。名声 −30。")
+	if fx.has("buy_bp"):
+		var bb: Dictionary = fx["buy_bp"]
+		if h["gold"] >= float(bb["cost"]):
+			h["gold"] -= float(bb["cost"])
+			h["month_out"] += float(bb["cost"])
+			sim.house(bb["hid"])["gold"] += float(bb["cost"])
+			h["bp"][bb["good"]] = true
+			msgs.append("%s的%s到手了。" % [GameData.good_name(bb["good"]), "地契" if GameData.tier(bb["good"]) == 1 else "图纸"])
+		else:
+			msgs.append("金币不足，买卖没成。")
+	if fx.has("delay_rival"):
+		var dr: Dictionary = fx["delay_rival"]
+		if h["gold"] >= float(GameData.RIVAL_DELAY_COST):
+			h["gold"] -= float(GameData.RIVAL_DELAY_COST)
+			h["month_out"] += float(GameData.RIVAL_DELAY_COST)
+			if sim.rng.randf() < 0.25:
+				h["rep"] = maxi(0, int(h["rep"]) - 40)
+				var f: Dictionary = sim.s["ports"][dr["port"]]["friend"]
+				f[sim.pid()] = maxi(0, int(f.get(sim.pid(), 0)) - 60)
+				msgs.append("港务官收了钱又告了密，全城都知道你干了什么。名声 −40，本城友好度大跌。")
+			else:
+				for sh in sim._ships_of(dr["hid"]):
+					if sh["port"] == dr["port"]:
+						sh["idle_until"] = int(sim.s["day"]) + GameData.RIVAL_DELAY_DAYS
+				msgs.append("港务官收了钱，%s的船被拦在泊位里查了 %d 天的货单。" % [GameData.HOUSES[dr["hid"]]["name"], GameData.RIVAL_DELAY_DAYS])
+		else:
+			msgs.append("金币不足，港务官没理你。")
 	if fx.has("say"):
 		msgs.append(fx["say"])
 	sim.s["event"] = null

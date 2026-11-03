@@ -251,6 +251,38 @@ func run(m: Control) -> void:
 	await _wait(0.4)
 	await _shot("20_rival_intel")
 	main._close_modal()
+	# round 13: a rival hails you on the quay; companions in town; the headquarters
+	main.sim.house()["gold"] = 90000.0
+	EventBook.rival_meeting(main.sim, "iron")
+	main._show_event()
+	await _wait(0.4)
+	await _shot("21_rival_meeting")
+	main._choose_event(4)
+	main._close_modal()
+	main.sim.house()["rep"] = 1600
+	main.sim.s["stats"]["wins"] = 1
+	main.sim.recruit("aman", "qianqi", "tavern")
+	main.sim.recruit("qian", "qianqi", "tavern")
+	main.sim.recruit("xiaoman", "muxia", "tavern")
+	var fl3: Dictionary = main.sim.flagship()
+	fl3["port"] = "qianqi"
+	fl3["to"] = ""
+	main._open_port("qianqi", 2)
+	main._enter_town()
+	await _wait(0.6)
+	await _shot("22_town_companions")
+	main.town._enter("post")
+	await _wait(0.4)
+	await _shot("23_hq")
+	main._leave_town()
+	main.sim.crew()["aman"]["aff"] = 50
+	main.sim.crew()["qian"]["aff"] = 50
+	EventBook.open_pair(main.sim, 0 if main.sim.crew().has("shen") else 1)
+	main._show_event()
+	await _wait(0.4)
+	await _shot("24_pair_scene")
+	main._choose_event(0)
+	main._close_modal()
 	main.sim.s["crown"] = {"hid": main.sim.pid(), "day": main.sim.s["day"]}
 	main._crown_celebration()
 	await _wait(0.4)

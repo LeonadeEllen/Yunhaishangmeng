@@ -12,6 +12,7 @@ func _init() -> void:
 		test_encounters()
 		test_crew()
 		test_explore()
+		test_rivals_and_hq()
 		print("FAILURES: %d" % failures)
 		quit(1 if failures > 0 else 0)
 		return
@@ -27,6 +28,7 @@ func _init() -> void:
 	test_encounters()
 	test_crew()
 	test_explore()
+	test_rivals_and_hq()
 	var seeds := [11, 22, 33, 44, 55]
 	var crowns := 0
 	var bot_stage := 0
@@ -501,6 +503,118 @@ func test_crew() -> void:
 	var sim2 := Sim.new()
 	check(sim2.from_json(sim.to_json()) and sim2.crew().size() == sim.crew().size() and sim2.crew()["luqing"]["post"] == "captain", "companions survive save/load")
 	check(sim.dismiss("qian")["ok"] and not sim.crew().has("qian") and not sim.recruit_ok("qian", "qianqi", "tavern")["ok"], "a dismissed companion does not come back")
+
+
+func test_rivals_and_hq() -> void:
+	print("rival meetings, companion pairs and the headquarters")
+	var sim := Sim.new()
+	sim.new_game(13)
+	var fl := sim.flagship()
+	sim.house()["gold"] = 50000.0
+	# a rival meeting offers a wager, a blueprint, a bribe and a drink
+	sim.s["day"] = 100
+	EventBook.rival_meeting(sim, "iron")
+	var ev: Dictionary = sim.s["event"]
+	check(ev["id"] == "rival:iron" and ev["choices"].size() == 5, "韦朔 hails you with five choices (%d)" % ev["choices"].size())
+	var bp_choice := -1
+	for i in ev["choices"].size():
+		if ev["choices"][i]["effects"].has("buy_bp"):
+			bp_choice = i
+	check(bp_choice >= 0, "the rival sells a blueprint you do not own")
+	var good: String = ev["choices"][bp_choice]["effects"]["buy_bp"]["good"]
+	var g0: float = sim.house()["gold"]
+	check(EventBook.resolve(sim, bp_choice)["ok"] and sim.has_bp(good) and sim.house()["gold"] < g0, "buying the rival's %s blueprint costs gold and grants it" % good)
+	# the wager moves gold one way or the other and the rival pays or pockets it
+	EventBook.rival_meeting(sim, "iron")
+	var rg0: float = sim.house("iron")["gold"]
+	g0 = sim.house()["gold"]
+	EventBook.resolve(sim, 0)
+	var diff: float = sim.house()["gold"] - g0
+	check(absf(diff) >= 1000.0 and absf(sim.house("iron")["gold"] - rg0 + diff) < 1.0, "the race moves the stake between the houses (%+d)" % int(diff))
+	# bribing the harbour master holds the rival's docked ships here
+	var rival: Dictionary = sim.ships_of("iron")[0]
+	rival["port"] = fl["port"]
+	rival["to"] = ""
+	EventBook.rival_meeting(sim, "iron")
+	ev = sim.s["event"]
+	var delay_choice := -1
+	for i in ev["choices"].size():
+		if ev["choices"][i]["effects"].has("delay_rival"):
+			delay_choice = i
+	var held := 0
+	var caught := 0
+	for k in 8:
+		sim.house()["rep"] = 500
+		rival["idle_until"] = 0
+		EventBook.rival_meeting(sim, "iron")
+		EventBook.resolve(sim, delay_choice)
+		if int(rival.get("idle_until", 0)) > int(sim.s["day"]):
+			held += 1
+		elif int(sim.house()["rep"]) < 500:
+			caught += 1
+	check(held + caught == 8 and held >= 3, "the bribe holds the ship or gets found out (%d held, %d caught)" % [held, caught])
+	# a debate with 殷望舒 moves reputation
+	sim.house()["rep"] = 500
+	EventBook.rival_meeting(sim, "tower")
+	EventBook.resolve(sim, 0)
+	check(int(sim.house()["rep"]) != 500, "the debate changes reputation (%d)" % int(sim.house()["rep"]))
+	# meetings trigger on arrival when a rival ship is docked here, not too often
+	var met := 0
+	sim.s["story"] = 3   # keep the main story from pre-empting the quay
+	for k in 40:
+		sim.s["day"] = 200 + k * 60
+		sim.s["event"] = null
+		sim.s.erase("rival_met")
+		rival["port"] = fl["port"]
+		sim.s["arrived"] = fl["id"]
+		EventBook.maybe_trigger(sim)
+		if sim.s["event"] != null and str(sim.s["event"]["id"]).begins_with("rival:"):
+			met += 1
+	check(met >= 8 and met <= 32, "docking beside a rival sometimes brings a hail (%d/40)" % met)
+	sim.s["event"] = null
+	sim.s["rival_met"] = int(sim.s["day"])
+	sim.s["arrived"] = fl["id"]
+	EventBook.maybe_trigger(sim)
+	check(sim.s["event"] == null or not str(sim.s["event"]["id"]).begins_with("rival:"), "a second hail waits %d days" % GameData.RIVAL_MEET_GAP)
+	sim.s["event"] = null
+	# companion pairs
+	sim.house()["gold"] = 80000.0
+	sim.house()["rep"] = 3600
+	sim.s["stats"]["wins"] = 1
+	check(sim.recruit("aman", "qianqi", "tavern")["ok"] and sim.recruit("shen", "fengyue", "tavern")["ok"], "阿蛮 and 沈白鹭 join")
+	sim.crew()["aman"]["aff"] = 45
+	sim.crew()["shen"]["aff"] = 45
+	sim.crew()["aman"]["chapter"] = 1   # personal chapters come first; the next one needs 60
+	sim.crew()["shen"]["chapter"] = 1
+	sim.s["event"] = null
+	sim._tick_crew()
+	check(sim.s["event"] != null and str(sim.s["event"]["id"]).begins_with("pair:"), "two well-liked companions share a scene in port")
+	var a0: int = sim.crew()["aman"]["aff"]
+	var r := EventBook.resolve(sim, 0)
+	check(r["ok"] and sim.crew()["aman"]["aff"] > a0 and sim.crew()["shen"]["aff"] > 45 and sim.s["pairs_done"].size() == 1, "the scene raises both affinities and is remembered")
+	sim._tick_crew()
+	check(sim.s["event"] == null, "a pair scene happens once")
+	# the headquarters
+	fl["port"] = "muxia"
+	check(not sim.hq_ok()["ok"], "the HQ needs the flagship at home")
+	fl["port"] = "qianqi"
+	fl["to"] = ""
+	var cap0 := sim.crew_cap()
+	var w0 := sim.crew_wages()
+	g0 = sim.house()["gold"]
+	check(sim.upgrade_hq()["ok"] and sim.hq_level() == 1 and sim.crew_cap() == cap0 + 1 and sim.house()["gold"] == g0 - 20000.0, "the first hall adds a companion slot")
+	var rep0: int = sim.house()["rep"]
+	sim.house()["gold"] = 300000.0
+	check(sim.upgrade_hq()["ok"] and sim.crew_wages() < w0, "the second hall discounts wages (%d -> %d)" % [w0, sim.crew_wages()])
+	var ships0 := sim.max_ships()
+	sim.house()["rep"] = 3600
+	check(sim.upgrade_hq()["ok"] and sim.max_ships() == ships0 + 1 and not sim.hq_ok()["ok"], "the top hall adds a ship and is the last level")
+	sim.house()["rep"] = rep0
+	sim.s["day"] = GameData.DAYS_MONTH * 5 - 1
+	sim.advance_day()
+	check(int(sim.house()["rep"]) >= rep0 + int(GameData.HQ[3]["rep"]), "the hall earns reputation monthly (%d -> %d)" % [rep0, int(sim.house()["rep"])])
+	var sim2 := Sim.new()
+	check(sim2.from_json(sim.to_json()) and sim2.hq_level() == 3 and sim2.s["pairs_done"].size() == 1, "HQ level and pair scenes survive save/load")
 
 
 ## Sail the flagship to dest and run days until it is docked again (or something interrupts).

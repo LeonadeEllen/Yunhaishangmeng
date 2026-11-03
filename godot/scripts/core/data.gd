@@ -262,6 +262,19 @@ const HOUSES := {
 		"perk": "industry", "perk_text": "工坊便宜 25%，原料产地每天多产 1 件", "pitch": "霞鲸台的议士们擅长投资产业，慢热但后劲足。"},
 }
 const HOUSE_IDS := ["lamp", "iron", "tower"]
+
+# the house's headquarters in its home city (round 13): a place to spend big and feel it
+const HQ := [
+	{"name": "商会小院", "cost": 0, "crew": 0, "rep": 0, "wage": 1.0, "ships": 0, "desc": "起家的小院子。"},
+	{"name": "商会会馆", "cost": 20000, "crew": 1, "rep": 15, "wage": 1.0, "ships": 0, "desc": "伙伴上限 +1，每月名声 +15。"},
+	{"name": "商会大厦", "cost": 60000, "crew": 2, "rep": 35, "wage": 0.9, "ships": 0, "desc": "伙伴上限 +2，每月名声 +35，伙伴月薪 −10%。"},
+	{"name": "盟会总馆", "cost": 150000, "crew": 3, "rep": 60, "wage": 0.8, "ships": 1, "desc": "伙伴上限 +3，每月名声 +60，伙伴月薪 −20%，船队上限 +1。"},
+]
+const HQ_REP := [0, 2, 3, 4]        # reputation level needed to build each HQ level
+const RIVAL_MEET := 0.45            # chance of a rival captain hailing you when you dock beside their ship
+const RIVAL_MEET_GAP := 45          # days between such meetings
+const RIVAL_DELAY_COST := 1200
+const RIVAL_DELAY_DAYS := 6
 const PLAYER := "lamp"
 
 # ------------------------------------------------------------------ protagonist
