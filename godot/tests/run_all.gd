@@ -11,6 +11,7 @@ func _init() -> void:
 	test_save_load()
 	test_idle_player_goes_bankrupt()
 	test_contracts_and_buyout()
+	test_production_chain()
 	var seeds := [11, 22, 33, 44, 55]
 	var wins := 0
 	for sd in seeds:
@@ -67,18 +68,47 @@ func test_contracts_and_buyout() -> void:
 	check(r["ok"] and is_equal_approx(sim.house()["gold"], g0 + float(c["reward"])), "contract pays its reward")
 	check(sim.open_contracts().is_empty() and int(fl["cargo"][c["good"]]["qty"]) == 3, "contract is consumed with its goods")
 	check(not sim.fulfill(fl["id"], c["id"])["ok"], "a contract cannot be paid twice")
-	# workshops: cap, patron fee, buyout
+	# buildings: patron fee, buyout
 	var port := "muxia"
-	sim.s["ports"][port]["workshops"] = {"tower": 3, sim.pid(): 1}
-	check(sim.patron(port) == "tower", "most workshop levels makes the patron")
-	check(not sim.invest(port)["ok"], "a full port refuses new workshops")
+	sim.house("tower")["gold"] = 50000.0
+	check(Industry.build(sim, port, 0, "fishery", "tower")["ok"], "rival builds a fishery")
+	check(sim.patron(port) == "tower", "most buildings makes the patron")
+	check(not Industry.build(sim, port, 1, "fishery")["ok"], "a field plot refuses a fishery")
 	var before := sim.buy_price(port, "fish")
 	sim.house()["gold"] = 100000.0
 	var tg: float = sim.house("tower")["gold"]
-	check(sim.buyout(port, "tower")["ok"], "buyout succeeds with enough gold")
-	check(int(sim.s["ports"][port]["workshops"]["tower"]) == 2 and int(sim.s["ports"][port]["workshops"][sim.pid()]) == 2, "buyout moves one level")
+	check(Industry.buyout(sim, port, 0)["ok"], "buyout succeeds with enough gold")
+	check(sim.s["ports"][port]["plots"][0]["owner"] == sim.pid(), "buyout moves the building")
 	check(sim.house("tower")["gold"] > tg, "the seller is compensated")
-	check(sim.patron(port) == "" and sim.buy_price(port, "fish") < before, "tie removes the patron fee")
+	check(sim.buy_price(port, "fish") < before, "becoming patron removes the harbour fee")
+
+
+func test_production_chain() -> void:
+	var sim := Sim.new()
+	sim.new_game(9)
+	sim.house()["gold"] = 200000.0
+	var port := "fengyue"
+	check(Industry.build(sim, port, 0, "mine")["ok"], "build a mine on an ore plot")
+	check(Industry.build(sim, port, 1, "forge")["ok"], "build a forge on a workshop plot")
+	check(Industry.has_wh(sim, port, sim.pid()), "building opens a warehouse")
+	for i in 10:
+		sim.advance_day()
+	var w := Industry.wh(sim, port, sim.pid())
+	check(int(w.get("ore", 0)) > 0, "mine fills the warehouse with ore")
+	check(sim.s["ports"][port]["plots"][1]["status"].begins_with("缺"), "forge without crystal reports what it lacks")
+	Industry.wh_add(sim, port, sim.pid(), "crystal", 20)
+	for i in 5:
+		sim.advance_day()
+	check(int(Industry.wh(sim, port, sim.pid()).get("steel", 0)) > 0, "forge turns ore + crystal into steel")
+	# ship <-> warehouse
+	var fl := sim.flagship()
+	fl["port"] = port
+	var r := sim.load_wh(fl["id"], "steel", 5)
+	check(r["ok"] and int(fl["cargo"]["steel"]["qty"]) == 5, "load steel from warehouse")
+	check(not sim.buy(fl["id"], "pearl", 1)["ok"], "a market refuses goods it does not trade")
+	var json := sim.to_json()
+	var sim2 := Sim.new()
+	check(sim2.from_json(json) and sim2.s["ports"][port]["plots"][1]["b"] == "forge", "buildings survive save/load")
 
 
 func test_price_feedback() -> void:

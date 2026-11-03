@@ -97,7 +97,9 @@ func run(m: Control) -> void:
 	await _wait(0.4)
 	await _shot("14d_contracts")
 	main.sim.house()["gold"] += 60000
-	main.sim.s["ports"]["muxia"]["workshops"] = {"tower": 2, main.sim.pid(): 1}
+	Industry.build(main.sim, "muxia", 0, "fishery", "tower")
+	Industry.build(main.sim, "muxia", 1, "farm")
+	Industry.build(main.sim, "muxia", 3, "loom")
 	main._open_port("muxia", 2)
 	await _wait(0.4)
 	await _shot("14e_industry")
