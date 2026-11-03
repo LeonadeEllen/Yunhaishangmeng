@@ -15,6 +15,7 @@ func _init() -> void:
 		test_rivals_and_hq()
 		test_city_works()
 		test_festival()
+		test_quests()
 		print("FAILURES: %d" % failures)
 		quit(1 if failures > 0 else 0)
 		return
@@ -33,6 +34,7 @@ func _init() -> void:
 	test_rivals_and_hq()
 	test_city_works()
 	test_festival()
+	test_quests()
 	var seeds := [11, 22, 33, 44, 55]
 	var crowns := 0
 	var bot_stage := 0
@@ -896,3 +898,71 @@ func test_bot_player(sd: int) -> Dictionary:
 	for hid in GameData.HOUSE_IDS:
 		check(sim.house(hid)["gold"] > -60000, "%s gold bounded (%d)" % [hid, int(sim.house(hid)["gold"])])
 	return {"crown": crown != null, "bot_stage": int(sim.house()["lh"]["stage"]), "early_bankrupt": early}
+
+
+func test_quests() -> void:
+	print("companion errands, trios and festival moments")
+	var sim := Sim.new()
+	sim.new_game(17)
+	sim.s["day"] = 1   # every tenth day adds +1 affinity to all; keep the arithmetic exact
+	var fl := sim.flagship()
+	sim.house()["gold"] = 80000.0
+	sim.house()["rep"] = 3600
+	sim.s["stats"]["wins"] = 1
+	sim.s["story"] = 3
+	check(sim.recruit("aman", "qianqi", "tavern")["ok"], "阿蛮 joins")
+	sim.crew()["aman"]["aff"] = Characters.QUEST_AFF
+	sim.crew()["aman"]["chapter"] = 2   # the next chapter needs 100, so the errand comes first
+	sim.s["event"] = null
+	sim._tick_crew()
+	check(sim.s["event"] != null and str(sim.s["event"]["id"]) == "quest:aman", "at affinity %d a companion asks a personal errand" % Characters.QUEST_AFF)
+	check(EventBook.resolve(sim, 0)["ok"] and sim.quest_state("aman") == "active", "accepting makes the errand active")
+	sim._tick_crew()
+	check(sim.s["event"] == null, "an errand is asked once")
+	var q: Dictionary = Characters.QUESTS["aman"]
+	check(not sim.quest_ok("aman")["ok"], "delivery needs the flagship at %s with the goods" % GameData.port_name(q["port"]))
+	fl["port"] = q["port"]
+	fl["to"] = ""
+	sim._stow(fl, q["good"], int(q["qty"]), 100.0)
+	var g0: float = sim.house()["gold"]
+	var r0: int = sim.house()["rep"]
+	var a0: int = sim.crew()["aman"]["aff"]
+	var d := sim.quest_deliver("aman")
+	check(d["ok"] and sim.quest_state("aman") == "done" and sim.house()["gold"] == g0 + float(q["gold"]) and sim.house()["rep"] > r0 and sim.crew()["aman"]["aff"] == a0 + Characters.QUEST_DONE_AFF and int(sim.fleet_cargo(fl).get(q["good"], {}).get("qty", 0)) == 0, "delivering pays %d gold, reputation and affinity and takes the goods" % int(q["gold"]))
+	# declining and failing
+	check(sim.recruit("shen", "fengyue", "tavern")["ok"], "沈白鹭 joins")
+	sim.crew()["shen"]["aff"] = Characters.QUEST_AFF
+	sim.crew()["shen"]["chapter"] = 2
+	sim.s["pairs_done"] = {"0": true}
+	sim.s["event"] = null
+	sim._tick_crew()
+	check(sim.s["event"] != null and str(sim.s["event"]["id"]) == "quest:shen", "the next companion asks hers")
+	check(EventBook.resolve(sim, 1)["ok"] and sim.quest_state("shen") == "declined" and sim.crew()["shen"]["aff"] == Characters.QUEST_AFF - 3, "declining costs a little affinity")
+	sim.quests()["shen"] = {"state": "active", "end": int(sim.s["day"]) - 1}
+	var s0: int = sim.crew()["shen"]["aff"]
+	sim._tick_crew()
+	check(sim.quest_state("shen") == "failed" and sim.crew()["shen"]["aff"] == s0 - Characters.QUEST_FAIL_AFF, "an overdue errand fails and costs %d affinity" % Characters.QUEST_FAIL_AFF)
+	# three companions share a scene
+	sim.s["crew"]["sang"] = sim.s["crew"]["aman"].duplicate(true)
+	sim.s["crew"]["sang"]["post"] = ""
+	for cid in ["aman", "shen", "sang"]:
+		sim.crew()[cid]["aff"] = Characters.TRIO_AFF
+		sim.crew()[cid]["chapter"] = 2
+	sim.quests()["sang"] = {"state": "declined", "end": 0}
+	sim.quests()["shen"] = {"state": "declined", "end": 0}
+	sim.s["event"] = null
+	sim._tick_crew()
+	check(sim.s["event"] != null and str(sim.s["event"]["id"]) == "trio:0", "three fond companions share a scene")
+	check(EventBook.resolve(sim, 0)["ok"] and sim.crew()["sang"]["aff"] == Characters.TRIO_AFF + 10 and sim.s["trios_done"].has("0"), "the trio scene raises all three affinities and is remembered")
+	sim._tick_crew()
+	check(sim.s["event"] == null, "a trio scene happens once")
+	# a companion's moment at the festival
+	sim.s["day"] = GameData.DAYS_YEAR - 1
+	sim.s["event"] = null
+	sim.advance_day()
+	var f = sim.s["festival_show"]
+	check(f != null and f.has("act") and sim.crew().has(f["act"]["cid"]), "a companion has a moment at the lantern festival (%s)" % str(f["act"]["cid"] if f != null and f.has("act") else ""))
+	# save and load keep it all
+	var sim2 := Sim.new()
+	sim2.from_json(sim.to_json())
+	check(sim2.quest_state("aman") == "done" and sim2.s["trios_done"].has("0"), "errands and trio scenes survive a save")

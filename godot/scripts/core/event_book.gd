@@ -168,6 +168,16 @@ static func _open(sim: Sim, ev: Dictionary) -> void:
 
 
 static func _find(id: String) -> Dictionary:
+	if id.begins_with("quest:"):
+		var qc := id.split(":")[1]
+		var q: Dictionary = Characters.QUESTS[qc]
+		return {"id": id, "title": q["title"], "text": q["text"], "art": "", "quest": qc,
+			"choices": [{"label": "答应下来", "effects": {"quest_accept": qc}}, {"label": "现在腾不出手", "effects": {"quest_decline": qc}}]}
+	if id.begins_with("trio:"):
+		var ti := int(id.split(":")[1])
+		var tr: Dictionary = Characters.TRIOS[ti]
+		return {"id": id, "title": tr["title"], "text": tr["text"], "art": "", "trio": ti,
+			"choices": tr["choices"].map(func(c): return {"label": c["label"], "effects": c["fx"]})}
 	if id.begins_with("pair:"):
 		var idx := int(id.split(":")[1])
 		var pr: Dictionary = Characters.PAIRS[idx]
@@ -198,6 +208,21 @@ static func open_pair(sim: Sim, idx: int) -> void:
 	var pr: Dictionary = Characters.PAIRS[idx]
 	sim.s["event"] = {"id": "pair:%d" % idx, "title": "%s与%s · %s" % [Characters.name_of(pr["a"]), Characters.name_of(pr["b"]), pr["title"]],
 		"text": pr["text"], "art": "story_loyalty", "choices": pr["choices"].map(func(x): return {"label": x["label"]})}
+
+
+## A companion asks a personal errand of you (round 17).
+static func open_quest(sim: Sim, cid: String) -> void:
+	var q: Dictionary = Characters.QUESTS[cid]
+	sim.s["event"] = {"id": "quest:%s" % cid, "title": "%s的托付 · %s" % [Characters.name_of(cid), q["title"]],
+		"text": q["text"] + "（送 %d 件%s到 %s，%d 天内，谢礼 %s 金）" % [int(q["qty"]), GameData.good_name(q["good"]), GameData.port_name(q["port"]), int(q["days"]), UiKit.money(q["gold"])],
+		"art": "story_letter", "choices": [{"label": "答应下来"}, {"label": "现在腾不出手"}]}
+
+
+static func open_trio(sim: Sim, idx: int) -> void:
+	var tr: Dictionary = Characters.TRIOS[idx]
+	var names: Array = tr["who"].map(func(c): return Characters.name_of(c))
+	sim.s["event"] = {"id": "trio:%d" % idx, "title": "%s · %s" % ["、".join(names), tr["title"]], "text": tr["text"],
+		"art": "story_loyalty", "choices": tr["choices"].map(func(x): return {"label": x["label"]})}
 
 
 ## A rival captain hails you on the quay (round 13). The choices depend on what the rival owns, so
@@ -321,6 +346,21 @@ static func resolve(sim: Sim, choice: int) -> Dictionary:
 			sim.add_rep(sim.pid(), int(fx["rep"]))
 		else:
 			h["rep"] = maxi(0, int(h["rep"]) + int(fx["rep"]))
+	if ev.has("trio"):
+		for who in Characters.TRIOS[int(ev["trio"])]["who"]:
+			sim.add_affinity(who, int(fx.get("aff_all", 0)))
+		if not sim.s.has("trios_done"):
+			sim.s["trios_done"] = {}
+		sim.s["trios_done"][str(int(ev["trio"]))] = true
+	if fx.has("quest_accept"):
+		var qa: String = fx["quest_accept"]
+		sim.quests()[qa] = {"state": "active", "end": int(sim.s["day"]) + int(Characters.QUESTS[qa]["days"])}
+		msgs.append("%s记下了这件事。" % Characters.name_of(qa))
+	if fx.has("quest_decline"):
+		var qd: String = fx["quest_decline"]
+		sim.quests()[qd] = {"state": "declined", "end": 0}
+		sim.add_affinity(qd, -3)
+		msgs.append("%s点点头，没有再提。" % Characters.name_of(qd))
 	if ev.has("pair"):
 		var pr: Dictionary = Characters.PAIRS[int(ev["pair"])]
 		sim.add_affinity(pr["a"], int(fx.get("aff_a", 0)))

@@ -1611,6 +1611,7 @@ func _tick_crew() -> void:
 	if int(s["day"]) % 10 == 0:
 		for cid in s["crew"]:
 			add_affinity(cid, 1)
+	_tick_quests()
 	# a personal story chapter opens when the fleet is in port and nothing else is going on
 	if s["event"] != null or s.get("encounter") != null:
 		return
@@ -1631,6 +1632,77 @@ func _tick_crew() -> void:
 		if int(s["crew"][pr["a"]]["aff"]) >= Characters.PAIR_AFF and int(s["crew"][pr["b"]]["aff"]) >= Characters.PAIR_AFF:
 			EventBook.open_pair(self, i)
 			return
+	# three of them, once each is fond enough (round 17)
+	for i in Characters.TRIOS.size():
+		if s.get("trios_done", {}).has(str(i)):
+			continue
+		var all_in := true
+		for who in Characters.TRIOS[i]["who"]:
+			if not s["crew"].has(who) or int(s["crew"][who]["aff"]) < Characters.TRIO_AFF:
+				all_in = false
+		if all_in:
+			EventBook.open_trio(self, i)
+			return
+	# a personal errand, once (round 17)
+	for cid in s["crew"]:
+		if quests().has(cid) or not Characters.QUESTS.has(cid) or int(s["crew"][cid]["aff"]) < Characters.QUEST_AFF:
+			continue
+		if port_open(Characters.QUESTS[cid]["port"]):
+			EventBook.open_quest(self, cid)
+			return
+
+
+# ------------------------------------------------------------------ companion errands (round 17)
+func quests() -> Dictionary:
+	if not s.has("quests"):
+		s["quests"] = {}
+	return s["quests"]
+
+
+func quest_state(cid: String) -> String:
+	return str(quests().get(cid, {}).get("state", ""))
+
+
+func quest_ok(cid: String) -> Dictionary:
+	if quest_state(cid) != "active":
+		return _fail("没有这件托付。")
+	var q: Dictionary = Characters.QUESTS[cid]
+	var fl := flagship()
+	if fl.is_empty() or not docked(fl) or fl["port"] != q["port"]:
+		return _fail("旗舰要停在 %s。" % GameData.port_name(q["port"]))
+	if int(fleet_cargo(fl).get(q["good"], {}).get("qty", 0)) < int(q["qty"]):
+		return _fail("船上要有 %d 件%s。" % [int(q["qty"]), GameData.good_name(q["good"])])
+	return {"ok": true, "msg": ""}
+
+
+func quest_deliver(cid: String) -> Dictionary:
+	var ok := quest_ok(cid)
+	if not ok["ok"]:
+		return ok
+	var q: Dictionary = Characters.QUESTS[cid]
+	var fl := flagship()
+	_unstow(fl, q["good"], int(q["qty"]))
+	var h := house()
+	h["gold"] += float(q["gold"])
+	h["month_in"] += float(q["gold"])
+	add_rep(pid(), int(q["rep"]))
+	add_affinity(cid, Characters.QUEST_DONE_AFF)
+	add_friend(q["port"], pid(), 40)
+	add_exp(60)
+	quests()[cid]["state"] = "done"
+	s["stats"]["quests"] = int(s["stats"].get("quests", 0)) + 1
+	var msg := "%s的托付办成了：%s 谢礼 %d 金，好感 +%d。" % [Characters.name_of(cid), q["done"], int(q["gold"]), Characters.QUEST_DONE_AFF]
+	_say(msg, "good")
+	return {"ok": true, "msg": msg}
+
+
+func _tick_quests() -> void:
+	for cid in quests():
+		var q: Dictionary = quests()[cid]
+		if q["state"] == "active" and int(s["day"]) > int(q["end"]):
+			q["state"] = "failed"
+			add_affinity(cid, -Characters.QUEST_FAIL_AFF)
+			_say("%s的托付过期了。%s 好感 −%d。" % [Characters.name_of(cid), Characters.QUESTS[cid]["fail"], Characters.QUEST_FAIL_AFF], "bad")
 
 
 func _crew_monthly() -> void:
@@ -2261,6 +2333,12 @@ func _festival() -> void:
 		"wins": int(st.get("wins", 0)) - int(snap0.get("wins", 0)),
 		"crew": s["crew"].size(), "visited": s["hero"]["visited"].size()}
 	s["festival_show"] = {"year": year, "awards": awards, "houses": houses, "mine": mine}
+	if not s["crew"].is_empty():
+		var mates: Array = s["crew"].keys()
+		var who: String = mates[rng.randi() % mates.size()]
+		if Characters.FESTIVAL.has(who):
+			s["festival_show"]["act"] = {"cid": who, "text": Characters.FESTIVAL[who]}
+			add_affinity(who, 5)
 	var worth := {}
 	for hid in GameData.HOUSE_IDS:
 		worth[hid] = net_worth(hid)
@@ -2626,6 +2704,8 @@ func from_json(text: String) -> bool:
 		s["houses"][hid]["hq"] = int(s["houses"][hid].get("hq", 0))
 	if s.has("rival_met"):
 		s["rival_met"] = int(s["rival_met"])
+	for cid in s.get("quests", {}):
+		s["quests"][cid]["end"] = int(s["quests"][cid]["end"])
 	if s.get("festival") != null:
 		s["festival"]["year"] = int(s["festival"]["year"])
 		for k in s["festival"]["snap"]:

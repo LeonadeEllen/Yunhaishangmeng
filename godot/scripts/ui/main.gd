@@ -217,7 +217,7 @@ func _show_help() -> void:
 		"· 伙伴：酒馆、船坞、行会里能遇到 12 位各有专长的人物，付安家费招入商会，每月发薪。安排岗位（航海长、账房、炮术长、接舷队长、船长）吃他们的能力加成；一起航行、打赢云盗、送礼都涨好感，好感到了会触发三章个人剧情，走完专长更强。",
 		"· 时间：空格暂停，1/2/3 切换速度。旗舰抵港时自动暂停。",
 		"· 对手：灯油行会靠跑商、铁誓舰团靠船队（船便宜、航速快）、白塔议士靠产业（工坊便宜、产地多产）。云盗对谁都下手，对手的船也会被劫。",
-		"· 相遇：旗舰停进对手船所在的港口时，对手的当家可能来打招呼：和韦朔赛船赌金、和殷望舒当众论道赌名声、向他们买地契和图纸、买通港务拖住他们的船，或者只是喝一杯。伙伴之间好感够高也会在港口发生他们自己的故事，进城时还能在街上碰到他们。",
+		"· 相遇：旗舰停进对手船所在的港口时，对手的当家可能来打招呼：和韦朔赛船赌金、和殷望舒当众论道赌名声、向他们买地契和图纸、买通港务拖住他们的船，或者只是喝一杯。伙伴之间好感够高也会在港口发生他们自己的故事，进城时还能在街上碰到他们。好感到 60 的伙伴会托你办一件私事：限期把一批货送到某港，在伙伴面板或那座港的酒馆交付，办成有谢礼、名声和好感，误期会伤感情；三位彼此相熟的伙伴也会有一起的场景。",
 		"· 会馆：在老家的商馆页扩建商会总部（三级）：伙伴上限、每月名声、伙伴薪水折扣，最高一级船队上限 +1。",
 		"· 灯节：每年开春灯节，三项颁奖（赛船冠军看最快的船、年度商王看一年身家涨幅、建设之光看恩主城数），奖金与名声，并回顾各家这一年。灯节 12 天里甜霞果、丝云绸、霞果酒卖价 +15%。对手的船在同一港相遇时也会互相赛船。",
 		"· 城建：在任何城主府出资修码头（补给更省、修船更快）、集市（行情恢复更快）、学堂（本城工坊增产），每项三级，全城受益。出资最多的商会是本城恩主：买货更便宜、每月得名声、城中立像。对手有钱时也会出资来争。",
@@ -945,6 +945,8 @@ func _show_festival() -> void:
 	box.add_child(HSeparator.new())
 	box.add_child(UiKit.label("你的这一年", 17, UiKit.INK, true))
 	box.add_child(UiKit.para("身家 %s 金 · 成交 %d 笔 · 委托 %d 件 · 剿匪 %d 胜 · 伙伴 %d 人 · 到过 %d 座港。灯节的 %d 天里，甜霞果、丝云绸、霞果酒各港卖价 +%d%%。" % [_signed(float(m["gain"])), int(m["trades"]), int(m["contracts"]), int(m["wins"]), int(m["crew"]), int(m["visited"]), GameData.FESTIVAL_DAYS, int(roundf((GameData.FESTIVAL_SELL - 1.0) * 100.0))], 14))
+	if f.has("act"):
+		box.add_child(UiKit.para("灯节夜里 · %s" % f["act"]["text"], 14, UiKit.JADE))
 	v.add_child(box)
 	v.move_child(box, v.get_child_count() - 2)
 
@@ -1692,6 +1694,33 @@ func _tab_tavern() -> void:
 		row.add_child(UiKit.button("放弃" if taken else "接下", func(): _act(sim.take_bounty(cid)); _refresh_side(), taken))
 		p.add_child(row)
 		side_body.add_child(p)
+	var here: Array = []
+	for qcid in sim.quests():
+		if sim.quest_state(qcid) == "active" and Characters.QUESTS[qcid]["port"] == _port:
+			here.append(qcid)
+	if not here.is_empty():
+		side_body.add_child(HSeparator.new())
+		side_body.add_child(UiKit.label("伙伴的托付", 18, UiKit.INK, true))
+		for qcid in here:
+			var q: Dictionary = Characters.QUESTS[qcid]
+			var qp := PanelContainer.new()
+			qp.add_theme_stylebox_override("panel", UiKit.box(Color("f6ecd2"), UiKit.BRASS, 5, 1, 6))
+			var qrow := HBoxContainer.new()
+			qrow.add_child(UiKit.icon(UiKit.sprite("leaders", Characters.PORTRAITS[qcid]), 34))
+			var qv := VBoxContainer.new()
+			qv.add_theme_constant_override("separation", 0)
+			qv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			qv.add_child(UiKit.label("%s · %s · 谢礼 %s" % [Characters.name_of(qcid), q["title"], UiKit.money(q["gold"])], 15, UiKit.INK, true))
+			var have := int(sim.fleet_cargo(sim.flagship()).get(q["good"], {}).get("qty", 0)) if not sim.flagship().is_empty() else 0
+			qv.add_child(UiKit.label("%d 件%s（船上 %d）· 剩 %d 天" % [int(q["qty"]), GameData.good_name(q["good"]), have, int(sim.quests()[qcid]["end"]) - int(sim.s["day"])], 13, UiKit.MUTED))
+			qrow.add_child(qv)
+			var qok := sim.quest_ok(qcid)
+			var qcc: String = qcid
+			var qb := UiKit.button("交付", func(): _act(sim.quest_deliver(qcc)); _refresh_side(), not qok["ok"])
+			qb.tooltip_text = "" if qok["ok"] else qok["msg"]
+			qrow.add_child(qb)
+			qp.add_child(qrow)
+			side_body.add_child(qp)
 	_recruit_rows("tavern")
 	side_body.add_child(HSeparator.new())
 	side_body.add_child(UiKit.label("酒馆", 18, UiKit.INK, true))
@@ -2002,7 +2031,7 @@ func _char_card(cid: String, where: String) -> Control:
 
 func _show_crew() -> void:
 	var v := _modal("伙伴 · %d / %d" % [sim.crew().size(), sim.crew_cap()], "", [
-		"岗位加成来自各人的能力；送礼（%d 金，每月一次）、一起航行、打赢云盗、完成委托都涨好感，好感到 %d / %d / %d 会在港口触发个人剧情，走完三章专长更强；两位好感都过 %d 的伙伴之间还会有他们自己的故事。每月薪水合计 %d 金%s。" % [Characters.GIFT_COST, Characters.CHAPTER_AFF[0], Characters.CHAPTER_AFF[1], Characters.CHAPTER_AFF[2], Characters.PAIR_AFF, sim.crew_wages(), ("（会馆折扣 %d%%）" % int(round((1.0 - float(GameData.HQ[sim.hq_level()]["wage"])) * 100.0))) if sim.hq_level() >= 2 else ""],
+		"岗位加成来自各人的能力；送礼（%d 金，每月一次）、一起航行、打赢云盗、完成委托都涨好感，好感到 %d / %d / %d 会在港口触发个人剧情，走完三章专长更强；两位好感都过 %d 的伙伴之间还会有他们自己的故事，好感到 %d 时伙伴会托你办一件私事，限期送一批货，办成有谢礼与名声，误期会伤感情。每月薪水合计 %d 金%s。" % [Characters.GIFT_COST, Characters.CHAPTER_AFF[0], Characters.CHAPTER_AFF[1], Characters.CHAPTER_AFF[2], Characters.PAIR_AFF, Characters.QUEST_AFF, sim.crew_wages(), ("（会馆折扣 %d%%）" % int(round((1.0 - float(GameData.HQ[sim.hq_level()]["wage"])) * 100.0))) if sim.hq_level() >= 2 else ""],
 	], [["关闭", func(): _close_modal()]], 760)
 	var list := VBoxContainer.new()
 	list.add_theme_constant_override("separation", 6)
@@ -2035,6 +2064,20 @@ func _show_crew() -> void:
 		if int(m["chapter"]) < 3:
 			nxt = " · 下一章 %d" % Characters.CHAPTER_AFF[int(m["chapter"])]
 		col.add_child(UiKit.label("好感 %d%s" % [int(m["aff"]), nxt], 12, UiKit.MUTED))
+		var qs := sim.quest_state(cid)
+		if Characters.QUESTS.has(cid) and qs != "":
+			var q: Dictionary = Characters.QUESTS[cid]
+			var qtxt := ""
+			match qs:
+				"active":
+					qtxt = "托付「%s」：送 %d 件%s到 %s，还剩 %d 天，谢礼 %d 金" % [q["title"], int(q["qty"]), GameData.good_name(q["good"]), GameData.port_name(q["port"]), int(sim.quests()[cid]["end"]) - int(sim.s["day"]), int(q["gold"])]
+				"done":
+					qtxt = "托付「%s」已办成。" % q["title"]
+				"failed":
+					qtxt = "托付「%s」没能赶上。" % q["title"]
+				"declined":
+					qtxt = "托付「%s」你当时没有接。" % q["title"]
+			col.add_child(UiKit.label(qtxt, 12, UiKit.TERRA if qs == "active" else UiKit.MUTED))
 		hb.add_child(col)
 		var ctl := VBoxContainer.new()
 		ctl.add_theme_constant_override("separation", 4)
@@ -2072,6 +2115,13 @@ func _show_crew() -> void:
 		db.tooltip_text = "辞退后不会再回来。"
 		row.add_child(db)
 		ctl.add_child(row)
+		if sim.quest_state(cid) == "active":
+			var qok := sim.quest_ok(cid)
+			var qb := UiKit.button("交付托付", func(): _act(sim.quest_deliver(ccid)); _show_crew(), true)
+			qb.disabled = not qok["ok"]
+			qb.tooltip_text = "" if qok["ok"] else qok["msg"]
+			qb.add_theme_font_size_override("font_size", 12)
+			ctl.add_child(qb)
 		hb.add_child(ctl)
 		list.add_child(box)
 	var scroll := ScrollContainer.new()

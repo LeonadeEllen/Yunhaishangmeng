@@ -1,6 +1,6 @@
 extends SceneTree
 ## Quick balance probe: N seeds of the greedy bot, prints when each house finishes each stage.
-## godot --headless --path godot -s res://tests/balance.gd   (SEEDS="66,77" picks the seeds)
+## godot --headless --path godot -s res://tests/balance.gd   (SEEDS="66,77" picks the seeds, PLAYER=iron picks the bot's house)
 
 func _init() -> void:
 	var seeds := [11, 22, 33, 44, 55, 66]
@@ -8,7 +8,7 @@ func _init() -> void:
 		seeds = Array(OS.get_environment("SEEDS").split(",")).map(func(x): return int(x))
 	for sd in seeds:
 		var sim := Sim.new()
-		sim.new_game(sd)
+		sim.new_game(sd, OS.get_environment("PLAYER") if OS.get_environment("PLAYER") != "" else "lamp")
 		var stage_day := {}
 		var won := {}
 		var buys := 0

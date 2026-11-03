@@ -207,6 +207,87 @@ const PAIRS := [
 	 "choices": [{"label": "把话说开", "fx": {"aff_a": 12, "aff_b": 12, "say": "「黑帆是我杀的。」「我知道。谢谢。」"}}, {"label": "回避这件事", "fx": {"aff_a": 2, "aff_b": 2}}]},
 ]
 
+## A personal errand each companion asks of you once their affinity is high enough (round 17):
+## carry qty of good to port within days. Reward gold + rep + affinity; failing costs affinity.
+const QUEST_AFF := 60
+const QUEST_FAIL_AFF := 10
+const QUEST_DONE_AFF := 20
+const QUESTS := {
+	"xiaoman": {"title": "家里的渔船", "good": "timber", "qty": 20, "port": "muxia", "days": 60, "gold": 1500, "rep": 20,
+		"text": "小满红着脸说，家里的渔船要换龙骨，母亲托他找二十根云杉木。「我自己攒不齐……少主能顺路捎去暮霞港吗？」",
+		"done": "小满的母亲在码头上等着，接过木头时抹了抹眼睛。", "fail": "小满说没关系，船先凑合用。他一整天没说话。"},
+	"luqing": {"title": "父亲的旧债", "good": "steel", "qty": 30, "port": "fengyue", "days": 90, "gold": 3500, "rep": 40,
+		"text": "陆青摊开一张旧单据：父亲当年欠风月坞锻炉三十件精钢没能交付。「我想替他把这笔货送到。」",
+		"done": "锻炉的老掌柜把旧单据撕了，说这笔账清了。陆青对着炉火站了很久。", "fail": "陆青把单据收回怀里：「下次。」"},
+	"qian": {"title": "旧匾", "good": "silk", "qty": 40, "port": "qianqi", "days": 90, "gold": 4500, "rep": 40,
+		"text": "钱不让想把老家商号的旧匾挂回千旗市，可匾下得先有四十匹丝云绸撑门面。「我出钱，您出船。」",
+		"done": "旧匾挂上的那天，千旗市半条街的掌柜都来贺。钱不让多付了一份运费。", "fail": "钱不让说匾不急，账先算清楚。"},
+	"aman": {"title": "老兄弟的炮", "good": "brass", "qty": 20, "port": "chishi", "days": 90, "gold": 3000, "rep": 40,
+		"text": "阿蛮的一个老兄弟在赤石矶开了铸炮铺，缺二十件铜件。「他当年替我挡过一刀。」",
+		"done": "铸炮铺的老板把一门小炮当谢礼搬上了船。阿蛮笑得像个孩子。", "fail": "阿蛮说老兄弟不会怪他，只是从此不提这件事。"},
+	"shen": {"title": "信义榜", "good": "canvas", "qty": 30, "port": "fengyue", "days": 90, "gold": 3000, "rep": 60,
+		"text": "沈家三十年前欠风月坞三十匹风帆布。沈白鹭说，要把名字重新挂回信义榜，先得把这笔货送到。",
+		"done": "信义榜上重新写上了沈家的名字。沈白鹭对着榜深深一揖。", "fail": "沈白鹭说名誉不急在一时，却擦了一夜的剑。"},
+	"cen": {"title": "好木料", "good": "timber", "qty": 60, "port": "tonghe", "days": 90, "gold": 2500, "rep": 30,
+		"text": "老岑看中了一批云杉木，要六十根运回铜鹤矶的船坞。「这辈子就想用一次好料。」",
+		"done": "老岑把木料一根根敲过去，说有三根是真正的好料。他很满意。", "fail": "老岑哼了一声，继续用旧木头。"},
+	"moyu": {"title": "画纸", "good": "fiber", "qty": 40, "port": "chishi", "days": 60, "gold": 2000, "rep": 30,
+		"text": "莫语画了一张画：四十捆云麻送到赤石矶的纸坊，换一叠能画海图的好纸。",
+		"done": "纸坊送来一叠雪白的纸。莫语当晚画了你的旗舰。", "fail": "莫语在旧纸背面继续画，什么也没说。"},
+	"ning": {"title": "学堂的书", "good": "glass", "qty": 20, "port": "cuijing", "days": 90, "gold": 3000, "rep": 50,
+		"text": "宁朝雨的学堂缺二十件琉璃做窗，孩子们冬天冷。「我知道这不是生意。」",
+		"done": "学堂的窗亮了。宁朝雨说第一堂课讲的是云海的航线。", "fail": "宁朝雨用油纸糊了窗，没有再提。"},
+	"feng": {"title": "夜市的货", "good": "pearl", "qty": 30, "port": "hongxiao", "days": 60, "gold": 5000, "rep": 20,
+		"text": "风九娘压低声音：红绡渡的夜市要三十颗雾珍珠，价钱好得不像话。「别问买家是谁。」",
+		"done": "珍珠在夜市里转了一圈，钱袋回来时沉了一倍。", "fail": "风九娘耸耸肩：「买家不等人。」"},
+	"sang": {"title": "好钢", "good": "steel", "qty": 40, "port": "fengyue", "days": 90, "gold": 4000, "rep": 40,
+		"text": "桑铁手要四十件精钢，送到风月坞的炉房。他只说了四个字：「铸那门炮。」",
+		"done": "炉房里响了三天三夜。第四天，一门漆黑的炮抬了出来。", "fail": "桑铁手盯着空炉子看了一夜。"},
+	"helan": {"title": "家乡的味道", "good": "wine", "qty": 20, "port": "qinglu", "days": 90, "gold": 3000, "rep": 30,
+		"text": "赫兰比划着说，青芦港有个同乡，想喝一口西边的霞果酒。二十坛。",
+		"done": "两个异乡人在码头上喝到天亮，用你听不懂的话唱歌。", "fail": "赫兰说同乡已经走了。"},
+	"ling": {"title": "鲸群的药", "good": "herb", "qty": 40, "port": "xiajing", "days": 60, "gold": 2500, "rep": 60,
+		"text": "灵说霞鲸台外海有一头病鲸，要四十捆灵参。「鲸记得谁帮过它们。」",
+		"done": "病鲸随船游了一程，整支船队都看见了。", "fail": "灵望着海面说，鲸走了。"},
+	"duoyin": {"title": "西边的铜", "good": "copper", "qty": 60, "port": "jinduo", "days": 90, "gold": 3500, "rep": 40,
+		"text": "铎音要六十件西边的赤铜运回金铎城：「我要铸一口西边也听得见的钟。」",
+		"done": "新钟敲响那天，金铎城的钟楼齐鸣了一刻钟。", "fail": "铎音说铜可以再等，钟不会跑。"},
+	"lusheng": {"title": "霞果", "good": "fruit", "qty": 50, "port": "qinglu", "days": 60, "gold": 2000, "rep": 30,
+		"text": "芦生想用西边的甜霞果酿一坛新酒，要五十筐送回青芦港的酒坊。「酿好了第一坛给少主。」",
+		"done": "第一坛新酒开封，酒坊门口排了半条街。", "fail": "芦生说霞果烂在路上也常有，明年再酿。"},
+}
+
+## Three companions who sail together, once each likes you enough (round 17).
+const TRIO_AFF := 50
+const TRIOS := [
+	{"who": ["aman", "shen", "sang"], "title": "三件兵器", "text": "阿蛮的炮、沈白鹭的剑、桑铁手的炉。三个人在甲板上争了一夜哪样才算兵器，最后一起把炮擦得发亮。",
+	 "choices": [{"label": "「都是商会的兵器。」", "fx": {"aff_all": 10, "say": "三个人从此轮流值夜，船上再没丢过一件货。"}}, {"label": "让他们早点睡", "fx": {"aff_all": 4}}]},
+	{"who": ["xiaoman", "lusheng", "qian"], "title": "两个少年一本账", "text": "小满和芦生合伙在港口卖酒，账记得乱七八糟。钱不让看了一眼，拿起算盘坐下了。",
+	 "choices": [{"label": "让钱不让带他们俩", "fx": {"aff_all": 10, "gold": 800, "say": "三个人的小买卖月底居然赚了八百金，交到了商会账上。"}}, {"label": "叫他们别胡闹", "fx": {"aff_all": 3}}]},
+	{"who": ["luqing", "moyu", "ling"], "title": "三张海图", "text": "陆青画气流，莫语画岛，灵在图上点出鲸群走的路。三张图叠在一起，云海第一次显得没那么大。",
+	 "choices": [{"label": "把三张图合成商会的总图", "fx": {"aff_all": 10, "intel": true, "say": "总图挂在旗舰舱壁上，各港行情一目了然。"}}, {"label": "各自收好", "fx": {"aff_all": 4}}]},
+	{"who": ["feng", "helan", "duoyin"], "title": "三种口音", "text": "风九娘的红绡渡话、赫兰的家乡话、铎音的金铎城腔，三个人用三种口音谈同一笔生意，码头上围了一圈人听。",
+	 "choices": [{"label": "让他们三个去谈下一笔", "fx": {"aff_all": 10, "rep": 40, "say": "那笔生意成了，码头上的人记住了你的商会。"}}, {"label": "笑着听完", "fx": {"aff_all": 4}}]},
+]
+
+## Each companion's moment at the lantern festival (round 17).
+const FESTIVAL := {
+	"xiaoman": "小满在灯谜摊前连猜十个，赢回一盏兔子灯，非要挂在旗舰船头。",
+	"luqing": "陆青在灯河边放了一盏灯，灯上写着父亲的名字。",
+	"qian": "钱不让把灯节的开销一笔一笔记下来，然后悄悄多付了舞狮队的赏钱。",
+	"aman": "阿蛮跟码头的力夫比赛喝酒，赢了，然后睡在了灯笼底下。",
+	"shen": "沈白鹭在灯下舞了一套剑，围观的人安静得能听见灯芯响。",
+	"cen": "老岑嫌花灯做得粗，自己扎了一盏飞艇灯，比谁的都亮。",
+	"moyu": "莫语画了整条灯街，画里每一盏灯都有人在笑。",
+	"ning": "宁朝雨在灯下给孩子们讲云海的来历，讲到灯都灭了。",
+	"feng": "风九娘在灯市上只逛不买，回来时手里却多了三样东西。",
+	"sang": "桑铁手用铁手托着一盏灯站了一夜，谁也没敢问为什么。",
+	"helan": "赫兰第一次见灯节，站在街口半天没动，然后买了整条街的灯。",
+	"ling": "灯亮起来的时候，有一群云鲸从城上空游过。灵说它们也来看灯。",
+	"duoyin": "铎音敲响了灯节的第一声钟，半座城都抬头看她。",
+	"lusheng": "芦生把新酿的酒摆在灯街口，一个时辰就卖光了。",
+}
+
 ## What companions say when you bump into them in town.
 const BANTER := {
 	"xiaoman": ["少主！这城的掌柜今天心情好，能多磨一点价。", "我把这城的消息都打听过了，没大事。"],

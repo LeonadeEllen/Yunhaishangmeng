@@ -309,6 +309,27 @@ func run(m: Control) -> void:
 	await _wait(0.6)
 	await _shot("28_town_lanterns")
 	main._leave_town()
+	# round 17: a companion's errand and the crew panel
+	main._close_modal()
+	main.sim.s["event"] = null
+	main.sim.s["encounter"] = null
+	main.sim.crew()["aman"]["aff"] = Characters.QUEST_AFF
+	main.sim.crew()["aman"]["chapter"] = 2
+	EventBook.open_quest(main.sim, "aman")
+	main._show_event()
+	await _wait(0.4)
+	await _shot("29_quest_offer")
+	main._choose_event(0)
+	main._close_modal()
+	var fl4: Dictionary = main.sim.flagship()
+	fl4["port"] = "chishi"
+	fl4["to"] = ""
+	main.sim._stow(fl4, "brass", 20, 100.0)
+	main._open_port("chishi", 5)
+	main._show_crew()
+	await _wait(0.4)
+	await _shot("30_crew_quest")
+	main._close_modal()
 	main.sim.s["crown"] = {"hid": main.sim.pid(), "day": main.sim.s["day"]}
 	main._crown_celebration()
 	await _wait(0.4)
