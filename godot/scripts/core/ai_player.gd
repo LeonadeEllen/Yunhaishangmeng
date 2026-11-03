@@ -236,6 +236,14 @@ static func monthly(sim: Sim, hid: String) -> void:
 		# a rich house puts money into the cities it cares about (round 14)
 		if spare > (30000.0 if style == "industry" else 50000.0) and sim.rng.randf() < 0.5:
 			_fund_works(sim, hid, spare)
+	# the grand works (round 28): built with money the lighthouse does not need
+	if lh["stage"] >= GameData.GRAND_STAGE and sim.grand_building(hid) == "":
+		var lh_need: float = 0.0 if lh["stage"] >= GameData.LIGHTHOUSE.size() else float(GameData.LIGHTHOUSE[lh["stage"]]["gold"])
+		var free_gold: float = h["gold"] - WORKING_CAPITAL * 2.0 - lh_need
+		for gw in GameData.GRAND:
+			if free_gold >= float(gw["gold"]) and sim.grand_ok(gw["id"], hid)["ok"]:
+				sim.start_grand(gw["id"], hid)
+				break
 	# Keep enough for the next lighthouse stage before expanding.
 	# a new hull only when the chest can also fill it: ships without trading capital just eat wages
 	if ships.size() < sim.max_ships(hid) and float(h.get("last_net", 0.0)) > 0.0 and h["gold"] > sim.ship_price("galleon", hid) + WORKING_CAPITAL * (1.5 if style == "ships" else 2.5):

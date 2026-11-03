@@ -119,6 +119,7 @@ func travel_days(from: String, to: String, type: String, hid: String = "", sh: D
 		if GameData.region_of(from) == 2 or GameData.region_of(to) == 2:
 			d *= 1.0 - 0.1 * spec_bonus("eastern")
 	d *= GameData.wind_factor(from, to, int(s.get("day", 0)))
+	d *= grand_speed(hid)
 	return maxi(1, int(roundf(d)))
 
 
@@ -187,7 +188,7 @@ func new_game(seed_value: int = 0, player: String = "lamp", difficulty: int = 1)
 		"event": null, "story": 0, "stats": {"trades": 0, "profit": 0, "best_trade": 0, "handled": {}, "contracts": 0},
 		"crown": null,
 		"hero": {"lvl": 1, "exp": 0, "pts": 0, "abil": {"sail": 1, "trade": 1, "fight": 1, "charm": 1}, "days_sailed": 0, "visited": {}},
-		"tutorial": 0, "hints": {}, "ties": {}, "player": player, "fashion": null, "difficulty": difficulty,
+		"tutorial": 0, "hints": {}, "ties": {}, "grand": {}, "player": player, "fashion": null, "difficulty": difficulty,
 		"contracts": [], "next_contract_id": 1,
 		"encounter": null, "battle": null, "battle_result": null,
 		"crew": {}, "roam": {"port": "", "until": 0},
@@ -1732,6 +1733,11 @@ func milestone_check(id: String) -> bool:
 			return int(h["lh"]["stage"]) >= 2
 		"lh3":
 			return int(h["lh"]["stage"]) >= 3
+		"grand":
+			for k in s["grand"]:
+				if s["grand"][k]["done"] and s["grand"][k]["hid"] == pid():
+					return true
+			return false
 	return false
 
 
@@ -1864,7 +1870,7 @@ func _rival_raid(sh: Dictionary, dest: String, force: bool = false) -> Dictionar
 	if not force and (day <= 60 or cargo_used(sh) == 0):
 		return {}
 	var east := GameData.region_of(sh["port"]) == 2 or GameData.region_of(dest) == 2
-	if not force and rng.randf() >= GameData.RIVAL_ENCOUNTER * (GameData.EAST_ENCOUNTER if east else 1.0):
+	if not force and rng.randf() >= GameData.RIVAL_ENCOUNTER * (GameData.EAST_ENCOUNTER if east else 1.0) * grand_pirate(sh["owner"]):
 		return {}
 	var hid: String = sh["owner"]
 	var h := house(hid)
@@ -2386,6 +2392,7 @@ func advance_day() -> void:
 	_tick_ships()
 	_tick_loans()
 	_tick_lighthouses()
+	_tick_grand()
 	_tick_crew()
 	_tick_milestones()
 	if day % GameData.DAYS_MONTH == 0:
@@ -2698,6 +2705,7 @@ func _monthly() -> void:
 			cost += float(crew_wages())
 		h["gold"] -= cost + interest
 		h["month_out"] += cost + interest
+		_grand_tribute(hid)
 		h["last_net"] = h["month_in"] - h["month_out"]
 		h["last_upkeep"] = cost + interest
 		h["month_in"] = 0.0
@@ -2721,6 +2729,130 @@ func _monthly() -> void:
 				h["gold"] += need
 				_say("金库见底，商会银行自动放贷 %d 金。" % int(need), "bad")
 	_tick_ties()
+
+
+# ========================================================= the grand works (round 28)
+
+func grand_state(id: String) -> Dictionary:
+	return s.get("grand", {}).get(id, {})
+
+
+## The work this house has under way, or "".
+func grand_building(hid: String = "") -> String:
+	if hid == "":
+		hid = pid()
+	for k in s.get("grand", {}):
+		var g: Dictionary = s["grand"][k]
+		if g["hid"] == hid and not g["done"]:
+			return k
+	return ""
+
+
+## Who finished this work, or "".
+func grand_builder(id: String) -> String:
+	var g := grand_state(id)
+	return g["hid"] if not g.is_empty() and g["done"] else ""
+
+
+static func grand_def(id: String) -> Dictionary:
+	for gw in GameData.GRAND:
+		if gw["id"] == id:
+			return gw
+	return {}
+
+
+func grand_ok(id: String, hid: String = "") -> Dictionary:
+	if hid == "":
+		hid = pid()
+	var gw := grand_def(id)
+	if gw.is_empty() or house(hid)["bankrupt"]:
+		return _fail("没有这项工程。")
+	var g := grand_state(id)
+	if not g.is_empty():
+		return _fail("%s已经%s了。" % [GameData.HOUSES[g["hid"]]["name"], "建成" if g["done"] else "在建"])
+	if int(house(hid)["lh"]["stage"]) < GameData.GRAND_STAGE:
+		return _fail("灯塔至少要建到%s。" % GameData.LIGHTHOUSE[GameData.GRAND_STAGE - 1]["name"])
+	if gw.get("crown", false) and (s["crown"] == null or s["crown"]["hid"] != hid):
+		return _fail("只有云海盟主能建。")
+	if grand_building(hid) != "":
+		return _fail("先把%s建完。" % grand_def(grand_building(hid))["name"])
+	if house(hid)["gold"] < float(gw["gold"]):
+		return _fail("需要 %s 金。" % UiKit.money(gw["gold"]))
+	return {"ok": true}
+
+
+func start_grand(id: String, hid: String = "") -> Dictionary:
+	if hid == "":
+		hid = pid()
+	var ok := grand_ok(id, hid)
+	if not ok["ok"]:
+		return ok
+	var gw := grand_def(id)
+	var h := house(hid)
+	h["gold"] -= float(gw["gold"])
+	h["month_out"] += float(gw["gold"])
+	if not s.has("grand"):
+		s["grand"] = {}
+	s["grand"][id] = {"hid": hid, "start": int(s["day"]), "end": int(s["day"]) + int(gw["days"]), "done": false}
+	_say("%s开工建%s，工期 %d 天。" % [GameData.HOUSES[hid]["name"], gw["name"], int(gw["days"])], "good" if hid == pid() else "major")
+	_ally_chip_in(hid, int(gw["gold"]))
+	return {"ok": true, "msg": "%s开工，%d 天后落成。" % [gw["name"], int(gw["days"])]}
+
+
+func _tick_grand() -> void:
+	for k in s.get("grand", {}):
+		var g: Dictionary = s["grand"][k]
+		if g["done"] or int(s["day"]) < int(g["end"]):
+			continue
+		g["done"] = true
+		var gw := grand_def(k)
+		var hid: String = g["hid"]
+		add_rep(hid, int(gw["prize"]))
+		s["stats"]["grand"] = int(s["stats"].get("grand", 0)) + 1
+		_say("%s落成，%s名声 +%d。%s" % [gw["name"], GameData.HOUSES[hid]["name"], int(gw["prize"]), gw["desc"]], "good" if hid == pid() else "major")
+
+
+## Pirate frequency on a house's voyages once the beacons stand.
+func grand_pirate(hid: String) -> float:
+	var b := grand_builder("beacons")
+	if b == "":
+		return 1.0
+	return GameData.GRAND_PIRATE["mine"] if b == hid else GameData.GRAND_PIRATE["other"]
+
+
+func grand_speed(hid: String) -> float:
+	var b := grand_builder("skylane")
+	if b == "":
+		return 1.0
+	return GameData.GRAND_SPEED["mine"] if b == hid else GameData.GRAND_SPEED["other"]
+
+
+func grand_output(hid: String) -> float:
+	var b := grand_builder("academy")
+	if b == "":
+		return 1.0
+	return GameData.GRAND_OUTPUT["mine"] if b == hid else GameData.GRAND_OUTPUT["other"]
+
+
+## Monthly tribute from every other house to the owner of the hall, plus goodwill in every port.
+func _grand_tribute(hid: String) -> void:
+	var owner := grand_builder("hall")
+	if owner == "" or house(owner)["bankrupt"]:
+		return
+	var h := house(hid)
+	if hid == owner:
+		for port in open_ports():
+			add_friend(port, owner, GameData.GRAND_FRIEND)
+		return
+	var trib := int(maxf(0.0, float(h["month_in"])) * GameData.GRAND_TRIBUTE)
+	if trib <= 0:
+		return
+	h["gold"] -= trib
+	h["month_out"] += trib
+	house(owner)["gold"] += trib
+	house(owner)["month_in"] += trib
+	if owner == pid():
+		s["stats"]["tribute"] = int(s["stats"].get("tribute", 0)) + trib
 
 
 # ================================================================== ties (round 26)
@@ -3161,6 +3293,11 @@ func from_json(text: String) -> bool:
 		s["ties"] = {}
 	for k in s["ties"]:
 		s["ties"][k] = int(s["ties"][k])
+	if not s.has("grand"):
+		s["grand"] = {}
+	for k in s["grand"]:
+		for kk in ["start", "end"]:
+			s["grand"][k][kk] = int(s["grand"][k][kk])
 	for k in s.get("milestones", {}):
 		s["milestones"][k] = int(s["milestones"][k])
 	if s["crown"] != null:

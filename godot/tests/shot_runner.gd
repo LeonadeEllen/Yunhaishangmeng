@@ -355,6 +355,17 @@ func run(m: Control) -> void:
 	main._refresh_all()
 	await _wait(0.3)
 	await _shot("42_fleet_loan")
+	# round 28: the grand works under the lighthouse
+	main.sim.house()["lh"]["stage"] = 2
+	main.sim.house()["gold"] = 3.0e6
+	main.sim.s["grand"] = {"beacons": {"hid": "iron", "start": 300, "end": 480, "done": true}, "skylane": {"hid": main.sim.pid(), "start": int(main.sim.s["day"]), "end": int(main.sim.s["day"]) + 240, "done": false}}
+	main._open_port(GameData.HOUSES[main.sim.pid()]["home"], 6)
+	await _wait(0.4)
+	var sc := main.side_body.get_parent() as ScrollContainer
+	sc.scroll_vertical = 100000
+	await _wait(0.3)
+	await _shot("43_grand")
+	sc.scroll_vertical = 0
 	main.sim.s["event"] = null
 	EventBook.festival_challenge(main.sim, "iron")
 	main._show_event()

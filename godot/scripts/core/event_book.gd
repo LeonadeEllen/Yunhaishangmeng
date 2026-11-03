@@ -134,7 +134,7 @@ static func maybe_trigger(sim: Sim) -> void:
 	if s.has("sailed"):
 		var mult := float(s["sailed"])
 		s.erase("sailed")
-		if int(s["day"]) > 60 and sim.rng.randf() < GameData.ENCOUNTER_CHANCE * mult and sim.fleet_cargo_used(sim.flagship()) > 0:
+		if int(s["day"]) > 60 and sim.rng.randf() < GameData.ENCOUNTER_CHANCE * mult * sim.grand_pirate(sim.pid()) and sim.fleet_cargo_used(sim.flagship()) > 0:
 			sim.start_encounter("pirates")
 			return
 	if s.has("arrived"):

@@ -247,6 +247,7 @@ func _show_help() -> void:
 		"· 城建：在任何城主府出资修码头（补给更省、修船更快）、集市（行情恢复更快）、学堂（本城工坊增产），每项三级，全城受益。出资最多的商会是本城恩主：买货更便宜、每月得名声、城中立像。对手有钱时也会出资来争。",
 		"· 探索：名声「商董」后可在任何行会赞助探险队（40,000 金），海图上出现通往东云域的「风隙」。旗舰和单独行动的测绘艇能去雾里的「?」处探索（船队里有测绘艇时看得更远）：发现城市、遗迹、漂流物，每个发现都会让周围的雾散开一些。东边的城天然出产西边没人做的加工品，长途跑一趟利润厚，云盗也多一倍。",
 		"· 灯塔：三层灯塔是云海盟主的象征，不建也可以一直玩下去。金币为负超过 30 天会破产；对手破产时，他们的当家会来告别。",
+		"· 云海大工程：灯塔建到灯廊之后，灯塔页下方出现四项大工程：灯标网（云盗更少）、环海天梯（航程更短）、万商大学堂（工坊增产）、盟主金殿（只有盟主能建，其他商会每月交盟贡）。每项只有一家能建成，全云海受益，建造者受益更多，盟友会出一成；对手有了闲钱也会抢着建，所以灯冠之后的较量不会停。",
 	]
 	var v := _modal("怎么玩", "", [], [["明白了", func(): _close_modal()]], 780)
 	var scroll := ScrollContainer.new()
@@ -1898,6 +1899,7 @@ func _tab_lighthouse() -> void:
 		side_body.add_child(UiKit.label("三层灯塔已全部落成。", 18, UiKit.UP, true))
 		if sim.s["crown"] != null:
 			side_body.add_child(UiKit.label("云海盟主：%s（%s）" % [GameData.HOUSES[sim.s["crown"]["hid"]]["name"], GameData.date_text(sim.s["crown"]["day"])], 14, UiKit.BRASS, true))
+		_grand_rows()
 		return
 	var st: Dictionary = GameData.LIGHTHOUSE[stage]
 	side_body.add_child(UiKit.label("第 %d 层 · %s" % [stage + 1, st["name"]], 20, UiKit.INK, true))
@@ -1940,6 +1942,42 @@ func _tab_lighthouse() -> void:
 		if sim.house(hid)["bankrupt"]:
 			txt = "%s：已破产" % GameData.HOUSES[hid]["name"]
 		side_body.add_child(UiKit.label(txt, 15, UiKit.MUTED))
+	_grand_rows()
+
+
+## The grand works of the cloud sea (round 28), under the lighthouse.
+func _grand_rows() -> void:
+	var stage: int = sim.house()["lh"]["stage"]
+	side_body.add_child(HSeparator.new())
+	side_body.add_child(UiKit.label("云海大工程", 16, UiKit.INK, true))
+	if stage < GameData.GRAND_STAGE:
+		side_body.add_child(UiKit.para("灯塔建到%s之后，可以出资建造改变整个云海的大工程：每项只有一家能建成，建成者留名，全云海受益，建造者受益更多。" % GameData.LIGHTHOUSE[GameData.GRAND_STAGE - 1]["name"], 13, UiKit.MUTED))
+		return
+	_hint("grand")
+	for gw in GameData.GRAND:
+		var g := sim.grand_state(gw["id"])
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 6)
+		var col := VBoxContainer.new()
+		col.add_theme_constant_override("separation", 0)
+		col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var done_by: String = ""
+		if not g.is_empty():
+			done_by = "%s%s" % [GameData.HOUSES[g["hid"]]["name"], ("建成于 " + GameData.date_text(int(g["end"]))) if g["done"] else ("在建，还 %d 天" % maxi(0, int(g["end"]) - int(sim.s["day"])))]
+		col.add_child(UiKit.label("%s · %s 金 · %d 天 · 名声 +%d" % [gw["name"], UiKit.money(gw["gold"]), int(gw["days"]), int(gw["prize"])], 14, UiKit.BRASS if not g.is_empty() and g["hid"] == sim.pid() else UiKit.INK, true))
+		var d := UiKit.label(gw["desc"] + (("　" + done_by) if done_by != "" else ""), 12, UiKit.UP if not g.is_empty() and g["done"] else UiKit.MUTED)
+		d.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		col.add_child(d)
+		row.add_child(col)
+		if g.is_empty():
+			var gid: String = gw["id"]
+			var ok := sim.grand_ok(gid)
+			var b := UiKit.button("开工", func(): _act(sim.start_grand(gid)))
+			b.disabled = not ok["ok"]
+			b.tooltip_text = ok.get("msg", "出资开工")
+			b.add_theme_font_size_override("font_size", 13)
+			row.add_child(b)
+		side_body.add_child(row)
 
 
 # =================================================================== actions
@@ -2807,6 +2845,7 @@ const HINTS := {
 	"hq": "商会总部：回到母港的商馆页可以扩建会馆，伙伴上限更高、每月添名声、薪水有折扣，最高一级还能多带一艘船。",
 	"intel": "对手情报：点顶栏的商会名随时查看对手的船、工坊、恩主城和灯塔进度。他们在同一港时，当家会来打招呼。",
 	"refit": "船坞改装：给船换炮、加货舱、升引擎都要花钱和时间，船员越多改得越快。旗舰和编队里的船一起改最省事。",
+	"grand": "云海大工程：灯塔建到灯廊之后，可以出资建造改变整个云海的工程——灯标网、天梯、大学堂，盟主还能建金殿。每项只有一家能建成，建成者留名得名声，全云海受益，建造者受益更多。对手有钱了也会抢着建。",
 	"ties": "三家的关系：喝酒、送礼、买图纸拉近，赛船论道输的一方记仇，收购工坊、买通港务最伤。关系够好可以结盟（不抢地、灯塔互助、灯节贺礼、交换行情），跌到底就是宿敌（收购他们的工坊便宜、赢他们名声更多，但他们会盯上你）。两家对手之间也会结盟或翻脸——落后的两家往往走到一起。",
 }
 

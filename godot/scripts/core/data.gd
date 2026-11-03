@@ -354,6 +354,7 @@ const MILESTONES := [
 	{"id": "free_crew", "name": "第一位免薪伙伴", "desc": "办成一位伙伴的第二件托付。"},
 	{"id": "worth_1m", "name": "身家百万", "desc": "净资产达到 1,000,000 金。"},
 	{"id": "lh2", "name": "灯廊", "desc": "点亮灯塔第二层。"},
+	{"id": "grand", "name": "云海大工程", "desc": "建成一项云海大工程。"},
 	{"id": "lh3", "name": "灯冠", "desc": "点亮灯塔第三层，成为云海盟主。"},
 ]
 
@@ -400,6 +401,24 @@ const ALLY_BUYOUT_SHARE := 0.3       # an ally pays this share of a buyout again
 const BAIL_TIE := 15                 # bailing an ally out of a debt crisis
 const BAIL_REFUSE_TIE := 20
 const BAIL_MAX := 0.3                # the player is asked only when the need is within this share of their gold
+
+# the grand works of the cloud sea (round 28): what a house does with its money after the lamps are lit
+const GRAND_STAGE := 2               # lighthouse stage needed before a house may start one
+const GRAND := [
+	{"id": "beacons", "name": "云海灯标网", "gold": 400000, "days": 180, "prize": 600,
+		"desc": "沿主航道立起一串灯标。云盗在各家的航路上少三成，在建造者的航路上少一半。"},
+	{"id": "skylane", "name": "环海天梯", "gold": 700000, "days": 240, "prize": 900,
+		"desc": "顺风的高层航道。各家航程缩短 5%，建造者的船缩短 15%。"},
+	{"id": "academy", "name": "万商大学堂", "gold": 1000000, "days": 300, "prize": 1200,
+		"desc": "各城工坊产量 +10%，建造者的工坊 +20%。"},
+	{"id": "hall", "name": "盟主金殿", "gold": 2000000, "days": 360, "prize": 2500, "crown": true,
+		"desc": "只有云海盟主能建。落成后其他商会每月收入的 3% 作为盟贡送到金殿，各港对金殿主人的友好度每月 +5。"},
+]
+const GRAND_PIRATE := {"mine": 0.5, "other": 0.7}
+const GRAND_SPEED := {"mine": 0.85, "other": 0.95}
+const GRAND_OUTPUT := {"mine": 1.2, "other": 1.1}
+const GRAND_TRIBUTE := 0.03
+const GRAND_FRIEND := 5
 const PLAYER := "lamp"
 
 # ------------------------------------------------------------------ protagonist

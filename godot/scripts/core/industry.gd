@@ -53,6 +53,7 @@ static func output(sim: Sim, pid: String, pl: Dictionary) -> int:
 	var school := sim.work_level(pid, "school")
 	if school > 0:
 		n = int(roundf(float(n) * (1.0 + 0.1 * float(school))))
+	n = int(roundf(float(n) * sim.grand_output(pl["owner"])))   # the academy (round 28)
 	return n
 
 

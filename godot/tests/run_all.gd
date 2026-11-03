@@ -21,6 +21,7 @@ func _init() -> void:
 		test_leaders()
 		test_ties()
 		test_allies()
+		test_grand()
 		print("FAILURES: %d" % failures)
 		quit(1 if failures > 0 else 0)
 		return
@@ -45,6 +46,7 @@ func _init() -> void:
 	test_leaders()
 	test_ties()
 	test_allies()
+	test_grand()
 	var seeds := [11, 22, 33, 44, 55]
 	var crowns := 0
 	var bot_stage := 0
@@ -1354,3 +1356,68 @@ func test_allies() -> void:
 	sim2.s["event"] = null
 	sim2._tick_crisis()
 	check(sim2.s["event"] == null, "no request when the need is beyond %d%% of the player's gold" % int(roundf(GameData.BAIL_MAX * 100.0)))
+
+
+func test_grand() -> void:
+	print("the grand works of the cloud sea (round 28)")
+	var sim := Sim.new()
+	sim.new_game(28)
+	sim.s["story"] = 3
+	sim.s["day"] = 1
+	var me := sim.pid()
+	sim.house()["gold"] = 5.0e6
+	check(not sim.grand_ok("beacons")["ok"] and str(sim.grand_ok("beacons")["msg"]).contains("灯塔"), "no grand work before lighthouse stage %d" % GameData.GRAND_STAGE)
+	sim.house()["lh"]["stage"] = 2
+	check(not sim.grand_ok("hall")["ok"], "the hall needs the crown")
+	var r0: int = sim.house()["rep"]
+	check(sim.start_grand("beacons")["ok"] and sim.house()["gold"] == 5.0e6 - float(GameData.GRAND[0]["gold"]) and sim.grand_building() == "beacons", "the beacons cost %d and are under way" % GameData.GRAND[0]["gold"])
+	check(not sim.grand_ok("skylane")["ok"] and str(sim.grand_ok("skylane")["msg"]).contains("先把"), "one work at a time")
+	check(not sim.grand_ok("beacons", "iron")["ok"], "a work already under way cannot be started by another house")
+	var sim_b := Sim.new()
+	check(sim_b.from_json(sim.to_json()) and typeof(sim_b.grand_state("beacons")["end"]) == TYPE_INT, "works survive a save")
+	sim.s["day"] = int(sim.grand_state("beacons")["end"])
+	sim._tick_grand()
+	check(sim.grand_builder("beacons") == me and sim.house()["rep"] == r0 + int(GameData.GRAND[0]["prize"]) and str(sim.s["log"][-1][1]).contains("落成"), "it completes on its day with a reputation prize")
+	sim._tick_milestones()
+	check(sim.milestone_done("grand"), "the first grand work is a milestone")
+	check(sim.grand_pirate(me) == GameData.GRAND_PIRATE["mine"] and sim.grand_pirate("iron") == GameData.GRAND_PIRATE["other"], "pirates are rarer for everyone, rarest for the builder")
+	# the sky lane, built by a rival
+	sim.house("tower")["lh"]["stage"] = 2
+	sim.house("tower")["gold"] = 5.0e6
+	check(sim.start_grand("skylane", "tower")["ok"], "a rival starts the sky lane")
+	sim.s["day"] = int(sim.grand_state("skylane")["end"])
+	var d_iron := sim.travel_days("qianqi", "tonghe", "galleon", "iron")
+	var d_tower := sim.travel_days("qianqi", "tonghe", "galleon", "tower")
+	sim._tick_grand()
+	check(sim.grand_speed("tower") == GameData.GRAND_SPEED["mine"] and sim.travel_days("qianqi", "tonghe", "galleon", "tower") < d_tower and sim.travel_days("qianqi", "tonghe", "galleon", "iron") <= d_iron, "voyages shorten for everyone, most for the builder (%d → %d)" % [d_tower, sim.travel_days("qianqi", "tonghe", "galleon", "tower")])
+	# the academy
+	var pl := {"b": "fish", "lvl": 1, "owner": me, "status": "ok"}
+	var n0 := Industry.output(sim, "muxia", pl)
+	sim.s["grand"]["academy"] = {"hid": me, "start": 1, "end": 1, "done": true}
+	check(Industry.output(sim, "muxia", pl) == int(roundf(float(n0) * GameData.GRAND_OUTPUT["mine"])), "the academy raises the builder's output by %d%%" % int(roundf((GameData.GRAND_OUTPUT["mine"] - 1.0) * 100.0)))
+	# the hall: tribute and goodwill
+	sim.s["crown"] = {"hid": me, "day": 1}
+	sim.s["grand"].erase("beacons")
+	sim.s["grand"]["skylane"]["done"] = true
+	check(sim.grand_ok("hall")["ok"], "the crown holder may build the hall")
+	sim.s["grand"]["hall"] = {"hid": me, "start": 1, "end": 1, "done": true}
+	sim.house("iron")["month_in"] = 10000.0
+	var ig: float = sim.house("iron")["gold"]
+	var pg: float = sim.house()["gold"]
+	sim._grand_tribute("iron")
+	check(sim.house("iron")["gold"] == ig - 300.0 and sim.house()["gold"] == pg + 300.0 and int(sim.s["stats"]["tribute"]) == 300, "the hall takes %d%% of another house's monthly income" % int(roundf(GameData.GRAND_TRIBUTE * 100.0)))
+	var f0 := sim.friend_pts("muxia")
+	sim._grand_tribute(me)
+	check(sim.friend_pts("muxia") == f0 + GameData.GRAND_FRIEND, "and every port warms to its owner each month")
+	# a rich rival builds with money its lighthouse does not need
+	var sim2 := Sim.new()
+	sim2.new_game(28)
+	sim2.s["story"] = 3
+	sim2.s["day"] = 1
+	sim2.house("iron")["lh"]["stage"] = 2
+	sim2.house("iron")["gold"] = 1.6e6
+	AiPlayer.monthly(sim2, "iron")
+	check(sim2.grand_building("iron") == "", "the bot keeps the lighthouse money")
+	sim2.house("iron")["gold"] = 5.0e6
+	AiPlayer.monthly(sim2, "iron")
+	check(sim2.grand_building("iron") == "beacons", "with spare money the bot starts the first work")
