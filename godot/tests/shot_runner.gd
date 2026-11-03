@@ -304,6 +304,13 @@ func run(m: Control) -> void:
 	await _wait(0.4)
 	await _shot("27_festival")
 	main._close_modal()
+	main.sim.s["event"] = null
+	EventBook.festival_challenge(main.sim, "iron")
+	main._show_event()
+	await _wait(0.4)
+	await _shot("31_festival_challenge")
+	main._choose_event(1)
+	main._close_modal()
 	main._open_port("qianqi", 0)
 	main._enter_town()
 	await _wait(0.6)

@@ -298,6 +298,12 @@ const FESTIVAL_SELL := 1.15
 const RIVAL_RACE := 0.08             # two rival ships in one port may race each other
 const RIVAL_RACE_GAP := 30
 const RIVAL_RACE_STAKE := 1500
+## At the lantern festival a rival may challenge the player (round 18).
+const FESTIVAL_CHALLENGE := 0.6
+const FESTIVAL_STAKE_MIN := 2000
+const FESTIVAL_STAKE_MAX := 15000
+const FESTIVAL_DUEL_REP := {"win": 120, "lose": 40}
+const LEADER_HE := {"lamp": "他", "iron": "他", "tower": "她"}
 const PLAYER := "lamp"
 
 # ------------------------------------------------------------------ protagonist

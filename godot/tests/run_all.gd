@@ -66,7 +66,7 @@ func run_until_over(sim: Sim, bot: bool, log_every: int = 0) -> void:
 	var guard := 0
 	while sim.s["over"] == null and sim.s["crown"] == null and guard < GameData.DAYS_YEAR * 12:
 		if sim.s["event"] != null:
-			EventBook.resolve(sim, 0)
+			EventBook.resolve(sim, sim.s["event"]["choices"].size() - 1 if str(sim.s["event"]["id"]).begins_with("rival:") else 0)
 		if sim.s["encounter"] != null:
 			sim.auto_encounter()
 		if bot:
@@ -172,7 +172,7 @@ func test_hero() -> void:
 	sim.depart(fl["id"], "chishi")
 	for i in 30:
 		if sim.s["event"] != null:
-			EventBook.resolve(sim, 0)
+			EventBook.resolve(sim, sim.s["event"]["choices"].size() - 1 if str(sim.s["event"]["id"]).begins_with("rival:") else 0)
 		sim.advance_day()
 	check(sim.docked(fl) and hero_visited(sim, "chishi"), "arriving logs the visit and grants experience (exp %d)" % int(sim.hero()["exp"]))
 	var sim2 := Sim.new()
@@ -199,7 +199,7 @@ func test_fleet_and_refit() -> void:
 	check(d["ok"] and not sim.docked(esc) and esc["arrive"] == fl["arrive"], "the fleet sails together")
 	for i in 40:
 		if sim.s["event"] != null:
-			EventBook.resolve(sim, 0)
+			EventBook.resolve(sim, sim.s["event"]["choices"].size() - 1 if str(sim.s["event"]["id"]).begins_with("rival:") else 0)
 		sim.advance_day()
 	check(sim.docked(fl) and fl["port"] == "chishi" and esc["port"] == "chishi", "fleet arrives together")
 	check(sim.sell(fl["id"], g, 120)["ok"] and sim.fleet_cargo_used(fl) == 0, "selling empties every hold in the fleet")
@@ -236,7 +236,7 @@ func test_multi_stop_route() -> void:
 	var visited := {}
 	for i in 200:
 		if sim.s["event"] != null:
-			EventBook.resolve(sim, 0)
+			EventBook.resolve(sim, sim.s["event"]["choices"].size() - 1 if str(sim.s["event"]["id"]).begins_with("rival:") else 0)
 		sim.advance_day()
 		visited[sh["port"] if sim.docked(sh) else sh["to"]] = true
 	check(visited.has("muxia") and visited.has("chishi") and visited.has("qianqi"), "the ship works its way around the loop")
@@ -751,7 +751,7 @@ func _sail_to(sim: Sim, dest: String) -> Dictionary:
 	for i in 60:
 		sim.advance_day()
 		if sim.s["event"] != null:
-			EventBook.resolve(sim, 0)
+			EventBook.resolve(sim, sim.s["event"]["choices"].size() - 1 if str(sim.s["event"]["id"]).begins_with("rival:") else 0)
 		if sim.s["encounter"] != null:
 			sim.encounter_pay()
 		if sim.docked(sim.flagship()):
@@ -871,7 +871,7 @@ func test_bot_player(sd: int) -> Dictionary:
 	var guard := 0
 	while sim.s["over"] == null and sim.s["crown"] == null and guard < GameData.DAYS_YEAR * 12:
 		if sim.s["event"] != null:
-			EventBook.resolve(sim, 0)
+			EventBook.resolve(sim, sim.s["event"]["choices"].size() - 1 if str(sim.s["event"]["id"]).begins_with("rival:") else 0)
 		if sim.s["encounter"] != null:
 			sim.auto_encounter()
 		if sim.s["discovery"] != null:

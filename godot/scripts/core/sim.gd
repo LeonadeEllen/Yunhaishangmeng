@@ -2333,6 +2333,12 @@ func _festival() -> void:
 		"wins": int(st.get("wins", 0)) - int(snap0.get("wins", 0)),
 		"crew": s["crew"].size(), "visited": s["hero"]["visited"].size()}
 	s["festival_show"] = {"year": year, "awards": awards, "houses": houses, "mine": mine}
+	# a rival steps out of the crowd with a challenge (round 18)
+	var rivals := alive.filter(func(hid): return hid != pid())
+	if not rivals.is_empty() and s["event"] == null and rng.randf() < GameData.FESTIVAL_CHALLENGE:
+		var who: String = rivals[rng.randi() % rivals.size()]
+		EventBook.festival_challenge(self, who)
+		s["festival_show"]["challenge"] = who
 	if not s["crew"].is_empty():
 		var mates: Array = s["crew"].keys()
 		var who: String = mates[rng.randi() % mates.size()]

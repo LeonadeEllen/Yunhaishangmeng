@@ -22,7 +22,7 @@ func _init() -> void:
 		while sim.s["over"] == null and sim.s["crown"] == null and sim.s["day"] < 360 * 12 and guard < 360 * 13:
 			guard += 1
 			if sim.s["event"] != null:
-				EventBook.resolve(sim, 0)
+				EventBook.resolve(sim, sim.s["event"]["choices"].size() - 1 if str(sim.s["event"]["id"]).begins_with("rival:") else 0)
 			if sim.s["encounter"] != null:
 				sim.auto_encounter()
 			if sim.s["discovery"] != null:

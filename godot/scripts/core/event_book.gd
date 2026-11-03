@@ -241,12 +241,16 @@ static func rival_meeting(sim: Sim, hid: String) -> void:
 	var stake := int(clampf(gold * 0.1, 1000.0, 8000.0)) / 100 * 100
 	var choices := []
 	var text := ""
+	var he: String = GameData.LEADER_HE[hid]
 	if hid == "iron":
 		text = "码头上停着铁誓舰团的%s。韦朔靠在船舷上冲你喊：「%s！敢不敢赛一程？从这里到灯标，先到的拿走赌金。」" % [ship_name, me]
 		choices.append({"label": "赛船：赌 %s 金" % UiKit.money(stake), "effects": {"race": {"hid": hid, "stake": stake}}})
-	else:
+	elif hid == "tower":
 		text = "白塔议士的%s泊在隔壁泊位。殷望舒撑着伞走过来，像在谈天气一样问起你的账目：「%s，当众论一论生意之道？输的那位，名声要折一些。」" % [ship_name, me]
 		choices.append({"label": "论道：赢了名声 +80，输了 −30", "effects": {"debate": {"hid": hid}}})
+	else:
+		text = "灯油行会的%s刚靠岸。霍照野提着一盏灯笼走过来，笑得像在卖东西：「%s，听说你的船快。赛一程？输的出灯油钱。」" % [ship_name, me]
+		choices.append({"label": "赛船：赌 %s 金" % UiKit.money(stake), "effects": {"race": {"hid": hid, "stake": stake}}})
 	# a blueprint they own and you do not (tier 1 deeds and tier 2 craft blueprints only)
 	var bp := ""
 	for g in sim.house(hid)["bp"]:
@@ -255,14 +259,35 @@ static func rival_meeting(sim: Sim, hid: String) -> void:
 			break
 	if bp != "":
 		var cost := int(float(GameData.DEED_COST) * 1.5) if GameData.tier(bp) == 1 else int(float(GameData.CRAFT_BP_COST) * 1.25)
-		choices.append({"label": "买%s的%s%s（%s 金）" % ["他" if hid == "iron" else "她", GameData.good_name(bp), "地契" if GameData.tier(bp) == 1 else "图纸", UiKit.money(cost)],
+		choices.append({"label": "买%s的%s%s（%s 金）" % [he, GameData.good_name(bp), "地契" if GameData.tier(bp) == 1 else "图纸", UiKit.money(cost)],
 			"effects": {"buy_bp": {"hid": hid, "good": bp, "cost": cost}}})
 	choices.append({"label": "买通港务，拖住%s的船 %d 天（%s 金，可能败露）" % [hh["name"], GameData.RIVAL_DELAY_DAYS, UiKit.money(GameData.RIVAL_DELAY_COST)],
 		"effects": {"delay_rival": {"hid": hid, "port": port}}})
-	choices.append({"label": "请%s喝一杯（300 金，本城友好度 +40）" % ("他" if hid == "iron" else "她"),
-		"effects": {"gold": -300, "friend": 40, "say": ("韦朔酒量惊人，临走拍着你的肩说下次再赛。" if hid == "iron" else "殷望舒只喝了半杯茶，却把本城哪位官员好说话都告诉了你。")}})
+	var drink := {"iron": "韦朔酒量惊人，临走拍着你的肩说下次再赛。", "tower": "殷望舒只喝了半杯茶，却把本城哪位官员好说话都告诉了你。", "lamp": "霍照野喝到一半开始推销灯油，你买了两坛才脱身。"}
+	choices.append({"label": "请%s喝一杯（300 金，本城友好度 +40）" % he,
+		"effects": {"gold": -300, "friend": 40, "say": drink[hid]}})
 	choices.append({"label": "点头致意，各忙各的", "effects": {}})
 	sim.s["event"] = {"id": "rival:%s" % hid, "title": "%s · %s在港" % [hh["leader"], hh["name"]], "text": text, "art": "events/14", "choices": choices}
+
+
+## A rival's challenge on the night of the lantern festival (round 18).
+static func festival_challenge(sim: Sim, hid: String) -> void:
+	var hh: Dictionary = GameData.HOUSES[hid]
+	var me: String = GameData.HOUSES[sim.pid()]["leader"]
+	var gold: float = sim.house()["gold"]
+	var stake := int(clampf(gold * 0.15, float(GameData.FESTIVAL_STAKE_MIN), float(GameData.FESTIVAL_STAKE_MAX))) / 100 * 100
+	var rep: Dictionary = GameData.FESTIVAL_DUEL_REP
+	var text := ""
+	var choices := []
+	if hid == "tower":
+		text = "灯节的灯河边围了一圈人。殷望舒站在灯下，扇子一合：「%s，今夜人多，正好当众论一论这一年的生意。输的那位，明年要被人笑话。」" % me
+		choices.append({"label": "灯下论道：赢了名声 +%d，输了 −%d" % [rep["win"], rep["lose"]], "effects": {"debate": {"hid": hid, "win": rep["win"], "lose": rep["lose"], "festival": true}}})
+	else:
+		var line := "韦朔把酒碗往桌上一磕：「%s！灯节夜里赛一程，满城的人都看着，赢的拿钱也拿名声。」" % me if hid == "iron" else "霍照野提着灯笼挤过人群：「%s，灯节不赌一把，灯白点了。赛一程？」" % me
+		text = "灯节的夜里，码头上灯火通明。" + line
+		choices.append({"label": "灯节赛船：赌 %s 金，赢了名声 +%d" % [UiKit.money(stake), rep["win"]], "effects": {"race": {"hid": hid, "stake": stake, "rep": rep["win"], "festival": true}}})
+	choices.append({"label": "举杯谢过，今夜只看灯", "effects": {"say": "%s笑了笑：「明年。」" % hh["leader"]}})
+	sim.s["event"] = {"id": "rival:%s" % hid, "title": "灯节 · %s的挑战" % hh["leader"], "text": text, "art": "events/15", "choices": choices}
 
 
 static func resolve(sim: Sim, choice: int) -> Dictionary:
@@ -373,27 +398,37 @@ static func resolve(sim: Sim, choice: int) -> Dictionary:
 		var rival := sim.house(rc["hid"])
 		var stake := float(rc["stake"])
 		var p := clampf(0.3 + 0.05 * float(sim.hero_abil("sail")) + 0.03 * float(sim.post_level("nav")) + (sim.speed_mult(fl) - 1.0) * 1.5, 0.2, 0.85)
+		var rl: String = GameData.HOUSES[rc["hid"]]["leader"]
+		var rrep := int(rc.get("rep", 40))
 		if sim.rng.randf() < p:
 			h["gold"] += stake
 			h["month_in"] += stake
 			rival["gold"] -= stake
-			sim.add_rep(sim.pid(), 40)
+			sim.add_rep(sim.pid(), rrep)
 			sim.s["stats"]["races"] = int(sim.s["stats"].get("races", 0)) + 1
-			msgs.append("你的旗舰先一个船身越过了灯标。韦朔隔着云雾骂了一句，把 %s 金赌金扔了过来。名声 +40。" % UiKit.money(stake))
+			if rc.get("festival", false):
+				sim.s["stats"]["duels"] = int(sim.s["stats"].get("duels", 0)) + 1
+			msgs.append("你的旗舰先一个船身越过了灯标。%s隔着云雾骂了一句，把 %s 金赌金扔了过来。名声 +%d。" % [rl, UiKit.money(stake), rrep])
 		else:
 			h["gold"] -= stake
 			h["month_out"] += stake
 			rival["gold"] += stake
-			msgs.append("韦朔的船像一道铁箭。他收起 %s 金赌金，笑得很大声。" % UiKit.money(stake))
+			msgs.append("%s的船像一道铁箭。%s收起 %s 金赌金，笑得很大声。" % [rl, GameData.LEADER_HE[rc["hid"]], UiKit.money(stake)])
 	if fx.has("debate"):
-		var rival_lvl := sim.rep_level(fx["debate"]["hid"])
+		var db: Dictionary = fx["debate"]
+		var rival_lvl := sim.rep_level(db["hid"])
+		var dl: String = GameData.HOUSES[db["hid"]]["leader"]
+		var win := int(db.get("win", 80))
+		var lose := int(db.get("lose", 30))
 		var p2 := clampf(0.3 + 0.06 * float(sim.hero_abil("charm")) + 0.05 * float(sim.rep_level() - rival_lvl), 0.2, 0.85)
 		if sim.rng.randf() < p2:
-			sim.add_rep(sim.pid(), 80)
-			msgs.append("殷望舒合上扇子：「受教了。」码头上的人记住了你的名字。名声 +80。")
+			sim.add_rep(sim.pid(), win)
+			if db.get("festival", false):
+				sim.s["stats"]["duels"] = int(sim.s["stats"].get("duels", 0)) + 1
+			msgs.append("%s合上扇子：「受教了。」码头上的人记住了你的名字。名声 +%d。" % [dl, win])
 		else:
-			h["rep"] = maxi(0, int(h["rep"]) - 30)
-			msgs.append("你被她的数字绕得说不出话，围观的人散得很快。名声 −30。")
+			h["rep"] = maxi(0, int(h["rep"]) - lose)
+			msgs.append("你被%s的数字绕得说不出话，围观的人散得很快。名声 −%d。" % [GameData.LEADER_HE[db["hid"]], lose])
 	if fx.has("buy_bp"):
 		var bb: Dictionary = fx["buy_bp"]
 		if h["gold"] >= float(bb["cost"]):
