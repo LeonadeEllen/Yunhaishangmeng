@@ -9,7 +9,7 @@ const STORY := [
 	{"id": "story_1", "day": 20, "art": "story_rescue", "title": "雾中求救 · 第一章",
 	 "text": "浓雾里传来断续的铃声。一艘小艇卡在乱流里，掌舵的少女叫陆青，她说父亲留下的航图被债主扣在了风月坞。",
 	 "choices": [
-		{"label": "拖她回港（燃晶 −300 金）", "effects": {"gold": -300, "story": 1, "say": "陆青记下了你的旗号。"}},
+		{"label": "拖她回港（补给 −300 金）", "effects": {"gold": -300, "story": 1, "say": "陆青记下了你的旗号。"}},
 		{"label": "给她一些口粮就走", "effects": {"good": ["wheat", 0], "story": 1, "say": "陆青向你道谢，眼里有些失望。"}},
 	 ]},
 	{"id": "story_2", "day": 150, "art": "story_letter", "title": "未送达的信匣 · 第二章",
@@ -34,7 +34,7 @@ const PIRATES := {"id": "pirates", "title": "云盗拦路", "art": "events/00", 
 
 const RANDOM := [
 	{"id": "whales", "title": "云鲸迁徙", "art": "events/03", "text": "一群云鲸横穿航道，带起的上升气流把飞艇托得老高。",
-	 "choices": [{"label": "顺着气流滑翔", "effects": {"gold": 200, "say": "省下了一大笔燃晶。"}}]},
+	 "choices": [{"label": "顺着气流滑翔", "effects": {"gold": 200, "say": "省下了一大笔补给。"}}]},
 	{"id": "smuggler", "title": "走私贩的提议", "art": "events/01", "text": "码头的阴影里有人压低声音：一批来路不明的雾珍珠，半价。",
 	 "choices": [
 		{"label": "买下 10 颗（1,200 金）", "effects": {"gold": -1200, "good": ["pearl", 10], "say": "珍珠成色不错，只是别问来历。"}},
@@ -83,7 +83,7 @@ const RANDOM := [
 	 ]},
 	{"id": "auction", "title": "码头拍卖", "art": "events/14", "text": "一位破产商人在码头拍卖存货：二十盏琉璃灯，起价一千五。",
 	 "choices": [
-		{"label": "出价（−1,500 金）", "effects": {"gold": -1500, "good": ["lamp", 20], "say": "你拍下了整箱琉璃灯。"}},
+		{"label": "出价（−1,500 金）", "effects": {"gold": -1500, "good": ["glass", 20], "say": "你拍下了整箱琉璃。"}},
 		{"label": "旁观", "effects": {}},
 	 ]},
 	{"id": "festival", "title": "灯会", "art": "events/15", "text": "港口正逢灯会，烟火与飞艇把夜空照得通亮，市民抢购甜霞果和丝云绸。",

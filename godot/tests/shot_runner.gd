@@ -59,13 +59,16 @@ func run(m: Control) -> void:
 	await _wait(0.3)
 	await _shot("10_route")
 	main._close_modal()
-	main._open_port("qianqi", 4)
+	main._open_port("qianqi", 6)
 	await _wait(0.3)
 	await _shot("11_lighthouse")
-	main._open_port("qianqi", 2)
-	await _wait(0.3)
-	await _shot("12_industry")
 	main._open_port("qianqi", 3)
+	await _wait(0.3)
+	await _shot("12_hall")
+	main._open_port("qianqi", 4)
+	await _wait(0.3)
+	await _shot("12b_guild")
+	main._open_port("qianqi", 5)
 	await _wait(0.3)
 	await _shot("13_tavern")
 	main._show_ledger()
@@ -93,18 +96,35 @@ func run(m: Control) -> void:
 		main.sim._post_contract()
 	var c0: Dictionary = main.sim.open_contracts()[0]
 	c0["chasers"].append("iron" if main.sim.pid() != "iron" else "tower")
-	main._open_port(main.sim.flagship()["port"], 3)
+	main._open_port(main.sim.flagship()["port"], 5)
 	await _wait(0.4)
 	await _shot("14d_contracts")
-	main.sim.house()["gold"] += 60000
-	main.sim.s["ports"]["muxia"]["workshops"] = {"tower": 2, main.sim.pid(): 1}
+	main.sim.house()["gold"] += 90000
+	main.sim.house()["rep"] = 700
+	main.sim.house("tower")["bp"]["fish"] = true
+	Industry.build(main.sim, "muxia", 0, "fish", "tower")
+	main.sim.house()["bp"]["wheat"] = true
+	main.sim.house()["bp"]["smoked"] = true
+	main.sim.s["ports"]["muxia"]["friend"][main.sim.pid()] = 400
+	Industry.build(main.sim, "muxia", 1, "wheat")
+	Industry.build(main.sim, "muxia", 3, "smoked")
 	main._open_port("muxia", 2)
 	await _wait(0.4)
-	await _shot("14e_industry")
-	main.sim.s["over"] = null
-	main.sim._end("first_light", "lamp")
+	await _shot("14e_post")
+	main._build_plot = 4
+	main._refresh_side()
+	await _wait(0.3)
+	await _shot("14f_build_menu")
+	main._build_plot = -1
+	main._trade_mode = 2
+	main._open_port("muxia", 0)
+	await _wait(0.3)
+	await _shot("14g_trade_wh_mode")
+	main._trade_mode = 0
+	main.sim.s["crown"] = {"hid": main.sim.pid(), "day": main.sim.s["day"]}
+	main._crown_celebration()
 	await _wait(0.4)
-	await _shot("15_end")
+	await _shot("15_crown")
 	get_tree().quit()
 
 

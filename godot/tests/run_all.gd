@@ -11,16 +11,22 @@ func _init() -> void:
 	test_save_load()
 	test_idle_player_goes_bankrupt()
 	test_contracts_and_buyout()
+	test_production_chain()
 	var seeds := [11, 22, 33, 44, 55]
-	var wins := 0
+	var crowns := 0
+	var bot_stage := 0
+	var early_bankrupt := 0
 	for sd in seeds:
-		if test_bot_player(sd):
-			wins += 1
-	print("bot wins %d/%d" % [wins, seeds.size()])
-	# The bot is a greedy trader without a human's planning; it should still win sometimes,
-	# and rivals should still beat it sometimes. Rivals typically finish the crown in years 9-10.
-	check(wins >= 1, "a greedy trading bot wins at least 1 of 5 seeds")
-	check(wins <= 4, "rivals beat the greedy bot at least once in 5 seeds")
+		var r := test_bot_player(sd)
+		crowns += 1 if r["crown"] else 0
+		bot_stage += 1 if r["bot_stage"] >= 1 else 0
+		early_bankrupt += r["early_bankrupt"]
+	print("crowns %d/%d, bot built stage 1 in %d/%d, early bankruptcies %d" % [crowns, seeds.size(), bot_stage, seeds.size(), early_bankrupt])
+	# Rivals should light the crown in roughly 6-12 years; the greedy bot (no planning) should at
+	# least raise the first stage, and nobody should go bankrupt in the opening two years.
+	check(crowns >= 4, "someone lights the crown within 12 years in at least 4 of 5 seeds")
+	check(bot_stage >= 3, "the trading bot builds the lighthouse base in at least 3 of 5 seeds")
+	check(early_bankrupt == 0, "no rival goes bankrupt in the first two years")
 	print("FAILURES: %d" % failures)
 	quit(1 if failures > 0 else 0)
 
@@ -35,7 +41,7 @@ func check(cond: bool, what: String) -> void:
 
 func run_until_over(sim: Sim, bot: bool, log_every: int = 0) -> void:
 	var guard := 0
-	while sim.s["over"] == null and guard < GameData.END_DAY + 10:
+	while sim.s["over"] == null and sim.s["crown"] == null and guard < GameData.DAYS_YEAR * 12:
 		if sim.s["event"] != null:
 			EventBook.resolve(sim, 0)
 		if bot:
@@ -67,18 +73,56 @@ func test_contracts_and_buyout() -> void:
 	check(r["ok"] and is_equal_approx(sim.house()["gold"], g0 + float(c["reward"])), "contract pays its reward")
 	check(sim.open_contracts().is_empty() and int(fl["cargo"][c["good"]]["qty"]) == 3, "contract is consumed with its goods")
 	check(not sim.fulfill(fl["id"], c["id"])["ok"], "a contract cannot be paid twice")
-	# workshops: cap, patron fee, buyout
+	# buildings: patron fee, buyout
 	var port := "muxia"
-	sim.s["ports"][port]["workshops"] = {"tower": 3, sim.pid(): 1}
-	check(sim.patron(port) == "tower", "most workshop levels makes the patron")
-	check(not sim.invest(port)["ok"], "a full port refuses new workshops")
-	var before := sim.buy_price(port, "fish")
+	sim.house("tower")["gold"] = 50000.0
+	sim.house("tower")["bp"]["fish"] = true
+	check(Industry.build(sim, port, 0, "fish", "tower")["ok"], "rival builds a fishery")
+	check(sim.patron(port) == "tower", "most buildings makes the patron")
 	sim.house()["gold"] = 100000.0
+	sim.house()["rep"] = 700
+	sim.house()["bp"]["fish"] = true
+	check(not Industry.build(sim, port, 1, "fish")["ok"], "a wheat plot refuses a fishery")
+	var before := sim.buy_price(port, "fish")
 	var tg: float = sim.house("tower")["gold"]
-	check(sim.buyout(port, "tower")["ok"], "buyout succeeds with enough gold")
-	check(int(sim.s["ports"][port]["workshops"]["tower"]) == 2 and int(sim.s["ports"][port]["workshops"][sim.pid()]) == 2, "buyout moves one level")
+	check(Industry.buyout(sim, port, 0)["ok"], "buyout succeeds with enough gold")
+	check(sim.s["ports"][port]["plots"][0]["owner"] == sim.pid(), "buyout moves the building")
 	check(sim.house("tower")["gold"] > tg, "the seller is compensated")
-	check(sim.patron(port) == "" and sim.buy_price(port, "fish") < before, "tie removes the patron fee")
+	check(sim.buy_price(port, "fish") < before, "becoming patron removes the harbour fee")
+
+
+func test_production_chain() -> void:
+	var sim := Sim.new()
+	sim.new_game(9)
+	sim.house()["gold"] = 200000.0
+	var port := "fengyue"
+	check(not Industry.build(sim, port, 0, "ore")["ok"], "no deed, no mine")
+	sim.house()["rep"] = 700
+	sim.s["ports"][port]["friend"][sim.pid()] = 400
+	check(sim.buy_deed(port, "ore")["ok"], "deed bought at friendliness 2")
+	check(Industry.build(sim, port, 0, "ore")["ok"], "build a mine on an ore plot")
+	check(not sim.craft_ok("steel")["ok"], "craft blueprint needs handled input")
+	sim.s["stats"]["handled"]["ore"] = 150
+	check(sim.buy_craft_bp("steel")["ok"], "craft blueprint bought at level 3 with experience")
+	check(Industry.build(sim, port, 1, "steel")["ok"], "build a forge on a workshop plot")
+	check(Industry.has_wh(sim, port, sim.pid()), "building opens a warehouse")
+	for i in 10:
+		sim.advance_day()
+	var w := Industry.wh(sim, port, sim.pid())
+	check(int(w.get("ore", 0)) > 0, "mine fills the warehouse with ore")
+	check(sim.s["ports"][port]["plots"][1]["status"].begins_with("缺"), "forge without timber reports what it lacks")
+	Industry.wh_add(sim, port, sim.pid(), "timber", 20)
+	for i in 5:
+		sim.advance_day()
+	check(int(Industry.wh(sim, port, sim.pid()).get("steel", 0)) > 0, "forge turns ore + timber into steel")
+	var fl := sim.flagship()
+	fl["port"] = port
+	var r := sim.load_wh(fl["id"], "steel", 5)
+	check(r["ok"] and int(fl["cargo"]["steel"]["qty"]) == 5, "load steel from warehouse")
+	check(not sim.secret_ok("cannon", "lamp")["ok"], "secret blueprint needs level 4")
+	var json := sim.to_json()
+	var sim2 := Sim.new()
+	check(sim2.from_json(json) and sim2.s["ports"][port]["plots"][1]["b"] == "steel" and sim2.house()["bp"].has("steel"), "buildings and blueprints survive save/load")
 
 
 func test_price_feedback() -> void:
@@ -98,6 +142,7 @@ func test_price_feedback() -> void:
 	var p_eq := roundf(sim.unit_price("qianqi", "silk", eq) * 1.06)
 	check(absf(p2 - p_eq) <= maxf(2.0, (p1 - p_eq) * 0.15), "price recovers toward equilibrium after 40 days (%d -> %d -> %d, eq %d)" % [p0, p1, p2, p_eq])
 	check(sim.sell_price("muxia", "silk") > sim.buy_price("qianqi", "silk"), "silk sells higher where it is wanted")
+	check(sim.sell_price("qianqi", "lamp") > GameData.GOODS["lamp"]["base"] * 1.3, "fine goods nobody makes are dear everywhere")
 
 
 func test_save_load() -> void:
@@ -128,18 +173,38 @@ func test_idle_player_goes_bankrupt() -> void:
 	var sim := Sim.new()
 	sim.new_game(3)
 	run_until_over(sim, false)
-	check(sim.s["over"] != null, "game ends")
-	check(sim.s["over"] != null and sim.s["over"]["kind"] in ["bankrupt", "rival_light"], "idle player loses (%s)" % (sim.s["over"]["kind"] if sim.s["over"] else "none"))
+	check(sim.s["over"] != null and sim.s["over"]["kind"] == "bankrupt", "idle player goes bankrupt (%s)" % (sim.s["over"]["kind"] if sim.s["over"] else "none"))
 	check(sim.house()["gold"] > -50000, "gold never runs away to huge negatives (%d)" % int(sim.house()["gold"]))
 
 
-func test_bot_player(sd: int) -> bool:
+func test_bot_player(sd: int) -> Dictionary:
 	print("bot player seed %d" % sd)
 	var sim := Sim.new()
 	sim.new_game(sd)
-	run_until_over(sim, true, GameData.DAYS_YEAR * 2)
-	var o = sim.s["over"]
-	check(o != null, "game ends (%s, year %d)" % [o["kind"] if o else "none", sim.s["day"] / GameData.DAYS_YEAR + 1])
+	var early := 0
+	var guard := 0
+	while sim.s["over"] == null and sim.s["crown"] == null and guard < GameData.DAYS_YEAR * 12:
+		if sim.s["event"] != null:
+			EventBook.resolve(sim, 0)
+		for sh in sim.ships_of(sim.pid()):
+			if sim.docked(sh):
+				AiPlayer.ship_turn(sim, sh)
+		if sim.s["day"] % GameData.DAYS_MONTH == 1:
+			AiPlayer.monthly(sim, sim.pid())
+		sim.advance_day()
+		guard += 1
+		if sim.s["day"] == GameData.DAYS_YEAR * 2:
+			for hid in GameData.HOUSE_IDS:
+				if hid != sim.pid() and sim.house(hid)["bankrupt"]:
+					early += 1
+		if sim.s["day"] % (GameData.DAYS_YEAR * 2) == 0:
+			var row := []
+			for hid in GameData.HOUSE_IDS:
+				var h := sim.house(hid)
+				row.append("%s %7d g / lh %d / %d ships / %d bld" % [hid, int(h["gold"]), h["lh"]["stage"], sim.ships_of(hid).size(), Industry.all_buildings(sim, hid).size()])
+			print("    y%-2d " % (sim.s["day"] / GameData.DAYS_YEAR), " | ".join(row))
+	var crown = sim.s["crown"]
+	print("    crown: %s (year %d)" % [str(crown["hid"]) if crown != null else "none", sim.s["day"] / GameData.DAYS_YEAR + 1])
 	for hid in GameData.HOUSE_IDS:
 		check(sim.house(hid)["gold"] > -60000, "%s gold bounded (%d)" % [hid, int(sim.house(hid)["gold"])])
-	return o != null and o["win"]
+	return {"crown": crown != null, "bot_stage": int(sim.house()["lh"]["stage"]), "early_bankrupt": early}
