@@ -298,6 +298,29 @@ const FESTIVAL_SELL := 1.15
 const RIVAL_RACE := 0.08             # two rival ships in one port may race each other
 const RIVAL_RACE_GAP := 30
 const RIVAL_RACE_STAKE := 1500
+## Milestones: the small satisfactions on the road to the crown (round 21). Checked daily; each gives reputation once.
+const MILESTONE_REP := 20
+const MILESTONES := [
+	{"id": "first_trade", "name": "第一笔买卖", "desc": "在任何港口卖出一批货。"},
+	{"id": "profit_10k", "name": "万金利润", "desc": "累计跑商利润达到 10,000 金。"},
+	{"id": "second_ship", "name": "第二艘船", "desc": "船队有两艘船。"},
+	{"id": "first_route", "name": "第一条航线", "desc": "给一艘船设好自动往返的航线。"},
+	{"id": "first_contract", "name": "第一件委托", "desc": "完成一张求购单。"},
+	{"id": "first_crew", "name": "第一位伙伴", "desc": "招募一位伙伴。"},
+	{"id": "rep_owner", "name": "名声「船东」", "desc": "名声到 150，可以开商馆、建工坊。"},
+	{"id": "first_workshop", "name": "第一座工坊", "desc": "在某座城建起自己的工坊。"},
+	{"id": "first_win", "name": "第一场胜仗", "desc": "在空战里打赢云盗。"},
+	{"id": "lh1", "name": "灯塔基座", "desc": "点亮灯塔第一层。"},
+	{"id": "hq2", "name": "会馆扩建", "desc": "把母港的商会总部扩建一级。"},
+	{"id": "benefactor", "name": "第一座恩主城", "desc": "成为一座城的恩主。"},
+	{"id": "east", "name": "东云海", "desc": "旗舰到过东边的任何一座港。"},
+	{"id": "award", "name": "灯节得奖", "desc": "在灯节上拿到任意一项奖。"},
+	{"id": "free_crew", "name": "第一位免薪伙伴", "desc": "办成一位伙伴的第二件托付。"},
+	{"id": "worth_1m", "name": "身家百万", "desc": "净资产达到 1,000,000 金。"},
+	{"id": "lh2", "name": "灯廊", "desc": "点亮灯塔第二层。"},
+	{"id": "lh3", "name": "灯冠", "desc": "点亮灯塔第三层，成为云海盟主。"},
+]
+
 ## At the lantern festival a rival may challenge the player (round 18).
 const FESTIVAL_CHALLENGE := 0.6
 const FESTIVAL_STAKE_MIN := 2000

@@ -86,6 +86,7 @@ func run(m: Control) -> void:
 	await _wait(0.3)
 	await _shot("34_hint_contract")
 	main.hint_panel.visible = false
+	main.sim._tick_milestones()
 	main._show_ledger()
 	await _wait(0.3)
 	await _shot("14_ledger")

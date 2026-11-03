@@ -1661,6 +1661,88 @@ func _tick_crew() -> void:
 				return
 
 
+# ------------------------------------------------------------------ milestones (round 21)
+func milestones() -> Dictionary:
+	if not s.has("milestones"):
+		s["milestones"] = {}
+	return s["milestones"]
+
+
+func milestone_done(id: String) -> bool:
+	return milestones().has(id)
+
+
+## Is this milestone's condition met right now?
+func milestone_check(id: String) -> bool:
+	var h := house()
+	var st: Dictionary = s["stats"]
+	match id:
+		"first_trade":
+			return int(st.get("trades", 0)) >= 1
+		"profit_10k":
+			return float(st.get("profit", 0.0)) >= 10000.0
+		"second_ship":
+			return ships_of().size() >= 2
+		"first_route":
+			return ships_of().any(func(x): return x["route"] != null)
+		"first_contract":
+			return int(st.get("contracts", 0)) >= 1
+		"first_crew":
+			return not s["crew"].is_empty()
+		"rep_owner":
+			return rep_level() >= 2
+		"first_workshop":
+			return not Industry.all_buildings(self, pid()).is_empty()
+		"first_win":
+			return int(st.get("wins", 0)) >= 1
+		"lh1":
+			return int(h["lh"]["stage"]) >= 1
+		"hq2":
+			return hq_level() >= 1
+		"benefactor":
+			return not benefactor_ports().is_empty()
+		"east":
+			for p in GameData.EAST_IDS:
+				if s["hero"]["visited"].has(p):
+					return true
+			return false
+		"award":
+			return int(st.get("awards", 0)) >= 1
+		"free_crew":
+			for cid in s["crew"]:
+				if s["crew"][cid].get("free", false):
+					return true
+			return false
+		"worth_1m":
+			return net_worth() >= 1000000.0
+		"lh2":
+			return int(h["lh"]["stage"]) >= 2
+		"lh3":
+			return int(h["lh"]["stage"]) >= 3
+	return false
+
+
+## The first milestones still ahead, in order.
+func next_milestones(n: int = 3) -> Array:
+	var out := []
+	for m in GameData.MILESTONES:
+		if not milestone_done(m["id"]):
+			out.append(m)
+			if out.size() >= n:
+				break
+	return out
+
+
+func _tick_milestones() -> void:
+	for m in GameData.MILESTONES:
+		if milestone_done(m["id"]) or not milestone_check(m["id"]):
+			continue
+		milestones()[m["id"]] = int(s["day"])
+		add_rep(pid(), GameData.MILESTONE_REP)
+		var nxt := next_milestones(1)
+		_say("里程碑 · %s。名声 +%d。%s" % [m["name"], GameData.MILESTONE_REP, ("下一个：%s——%s" % [nxt[0]["name"], nxt[0]["desc"]]) if not nxt.is_empty() else "云海的路都走完了。"], "major")
+
+
 # ------------------------------------------------------------------ companion errands (round 17)
 func quests() -> Dictionary:
 	if not s.has("quests"):
@@ -2289,6 +2371,7 @@ func advance_day() -> void:
 	_tick_ships()
 	_tick_lighthouses()
 	_tick_crew()
+	_tick_milestones()
 	if day % GameData.DAYS_MONTH == 0:
 		_monthly()
 	if day % GameData.DAYS_YEAR == 0:
@@ -2363,6 +2446,8 @@ func _festival() -> void:
 		h["gold"] += float(GameData.FESTIVAL_PRIZE)
 		h["month_in"] += float(GameData.FESTIVAL_PRIZE)
 		add_rep(a["hid"], int(GameData.FESTIVAL_REP[a["kind"]]))
+		if a["hid"] == pid():
+			s["stats"]["awards"] = int(s["stats"].get("awards", 0)) + 1
 		_say("灯节 · %s，奖金 %d 金，名声 +%d。" % [a["text"], GameData.FESTIVAL_PRIZE, int(GameData.FESTIVAL_REP[a["kind"]])], "major" if a["hid"] == pid() else "rival")
 	var houses := []
 	for hid in GameData.HOUSE_IDS:
@@ -2663,6 +2748,8 @@ func from_json(text: String) -> bool:
 		s[k] = int(s[k])
 	if not s.has("hints"):
 		s["hints"] = {}
+	for k in s.get("milestones", {}):
+		s["milestones"][k] = int(s["milestones"][k])
 	if s["crown"] != null:
 		s["crown"]["day"] = int(s["crown"]["day"])
 	if not s.has("hero"):

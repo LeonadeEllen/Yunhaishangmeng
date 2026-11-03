@@ -973,6 +973,12 @@ func _show_festival() -> void:
 	box.add_child(HSeparator.new())
 	box.add_child(UiKit.label("你的这一年", 17, UiKit.INK, true))
 	box.add_child(UiKit.para("身家 %s 金 · 成交 %d 笔 · 委托 %d 件 · 剿匪 %d 胜 · 伙伴 %d 人 · 到过 %d 座港。灯节的 %d 天里，甜霞果、丝云绸、霞果酒各港卖价 +%d%%。" % [_signed(float(m["gain"])), int(m["trades"]), int(m["contracts"]), int(m["wins"]), int(m["crew"]), int(m["visited"]), GameData.FESTIVAL_DAYS, int(roundf((GameData.FESTIVAL_SELL - 1.0) * 100.0))], 14))
+	var year_ms := []
+	for ms in GameData.MILESTONES:
+		if sim.milestone_done(ms["id"]) and int(sim.milestones()[ms["id"]]) / GameData.DAYS_YEAR == int(f["year"]) - 1:
+			year_ms.append(ms["name"])
+	if not year_ms.is_empty():
+		box.add_child(UiKit.para("这一年的里程碑：%s" % "、".join(year_ms), 14, UiKit.INK))
 	if f.has("act"):
 		box.add_child(UiKit.para("灯节夜里 · %s" % f["act"]["text"], 14, UiKit.JADE))
 	v.add_child(box)
@@ -2490,7 +2496,35 @@ func _show_ledger() -> void:
 	for hid in GameData.HOUSE_IDS:
 		if hid != sim.pid():
 			lines.append("%s：%d 艘船 · 灯塔 %d/3 · 名声 %s · 工坊 %d 座%s" % [GameData.HOUSES[hid]["name"], sim.ships_of(hid).size(), sim.house(hid)["lh"]["stage"], GameData.REP_NAMES[sim.rep_level(hid) - 1], Industry.all_buildings(sim, hid).size(), " · 已破产" if sim.house(hid)["bankrupt"] else ""])
-	_modal("账簿", "", lines, [["关闭", func(): _close_modal()]])
+	var v := _modal("账簿", "", lines, [["关闭", func(): _close_modal()]], 700)
+	# milestones (round 21)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 3)
+	var done_n := 0
+	for m in GameData.MILESTONES:
+		if sim.milestone_done(m["id"]):
+			done_n += 1
+	box.add_child(UiKit.label("里程碑 %d / %d" % [done_n, GameData.MILESTONES.size()], 17, UiKit.INK, true))
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 18)
+	grid.add_theme_constant_override("v_separation", 2)
+	var nxt: Array = sim.next_milestones(1)
+	for m in GameData.MILESTONES:
+		var done := sim.milestone_done(m["id"])
+		var is_next: bool = not nxt.is_empty() and nxt[0]["id"] == m["id"]
+		var when := ""
+		if done:
+			when = " · " + GameData.date_text(int(sim.milestones()[m["id"]])).split(" · ")[0]
+		var l := UiKit.label("%s %s%s" % ["✓" if done else ("▶" if is_next else "○"), m["name"], when], 13, UiKit.JADE if done else (UiKit.INK if is_next else UiKit.MUTED), is_next)
+		l.tooltip_text = m["desc"]
+		l.custom_minimum_size = Vector2(310, 0)
+		grid.add_child(l)
+	box.add_child(grid)
+	if not nxt.is_empty():
+		box.add_child(UiKit.para("下一个：%s——%s" % [nxt[0]["name"], nxt[0]["desc"]], 13, UiKit.MUTED))
+	v.add_child(box)
+	v.move_child(box, v.get_child_count() - 2)
 
 
 ## What a house is up to: ships and their cargo, workshops, lighthouse needs, strongholds.

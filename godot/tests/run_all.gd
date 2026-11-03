@@ -16,6 +16,8 @@ func _init() -> void:
 		test_city_works()
 		test_festival()
 		test_quests()
+		test_festival_challenge()
+		test_milestones()
 		print("FAILURES: %d" % failures)
 		quit(1 if failures > 0 else 0)
 		return
@@ -35,6 +37,8 @@ func _init() -> void:
 	test_city_works()
 	test_festival()
 	test_quests()
+	test_festival_challenge()
+	test_milestones()
 	var seeds := [11, 22, 33, 44, 55]
 	var crowns := 0
 	var bot_stage := 0
@@ -999,3 +1003,74 @@ func test_quests() -> void:
 	var sim2 := Sim.new()
 	sim2.from_json(sim.to_json())
 	check(sim2.quest_state("aman") == "done" and sim2.quest_state("aman#2") == "done" and sim2.crew()["aman"].get("free", false) and sim2.s["trios_done"].has("0"), "errands, keepsakes and trio scenes survive a save")
+
+
+func test_milestones() -> void:
+	print("milestones")
+	var sim := Sim.new()
+	sim.new_game(21)
+	sim.s["day"] = 1
+	check(sim.next_milestones(1)[0]["id"] == "first_trade" and sim.milestones().is_empty(), "a new game starts with the first trade ahead")
+	var r0: int = sim.house()["rep"]
+	sim.s["stats"]["trades"] = 1
+	sim._tick_milestones()
+	check(sim.milestone_done("first_trade") and sim.house()["rep"] == r0 + GameData.MILESTONE_REP and sim.next_milestones(1)[0]["id"] == "profit_10k", "the first trade is a milestone worth %d reputation; the next one is named" % GameData.MILESTONE_REP)
+	sim._tick_milestones()
+	check(sim.house()["rep"] == r0 + GameData.MILESTONE_REP, "a milestone pays once")
+	var ids: Array = GameData.MILESTONES.map(func(m): return m["id"])
+	for id in ids:
+		sim.milestone_check(id)   # every check runs without error
+	sim.s["hero"]["visited"]["jinduo"] = true
+	sim.house()["gold"] = 1500000.0
+	sim._tick_milestones()
+	check(sim.milestone_done("east") and sim.milestone_done("worth_1m") and not sim.milestone_done("lh3"), "milestones are independent of order")
+	var sim2 := Sim.new()
+	sim2.from_json(sim.to_json())
+	check(sim2.milestone_done("east") and int(sim2.milestones()["east"]) == 1, "milestones survive a save with their day")
+	# the festival stat feeds the award milestone
+	sim.s["stats"]["awards"] = 1
+	sim._tick_milestones()
+	check(sim.milestone_done("award"), "a festival prize counts")
+
+
+func test_festival_challenge() -> void:
+	print("a rival's challenge at the lantern festival")
+	var sim := Sim.new()
+	sim.new_game(18)
+	sim.s["story"] = 3
+	sim.house()["gold"] = 50000.0
+	var got := 0
+	var declined := false
+	var fought := false
+	for i in 24:
+		sim.s["day"] = (i + 1) * GameData.DAYS_YEAR - 1
+		sim.s["event"] = null
+		sim.s["encounter"] = null
+		sim.advance_day()
+		var f = sim.s["festival_show"]
+		if f == null or not f.has("challenge"):
+			continue
+		got += 1
+		check(sim.s["event"] != null and str(sim.s["event"]["id"]) == "rival:%s" % f["challenge"] and sim.s["event"]["title"].begins_with("灯节"), "the review names the challenger and the challenge waits behind it")
+		if not declined:
+			var r0: int = sim.house()["rep"]
+			var g0: float = sim.house()["gold"]
+			check(EventBook.resolve(sim, sim.s["event"]["choices"].size() - 1)["ok"] and sim.house()["rep"] == r0 and sim.house()["gold"] == g0, "declining costs nothing")
+			declined = true
+		elif not fought:
+			var r1: int = sim.house()["rep"]
+			var g1: float = sim.house()["gold"]
+			var fx: Dictionary = sim.s["event"]["choices"][0]["effects"]
+			check(EventBook.resolve(sim, 0)["ok"] and (sim.house()["rep"] != r1 or sim.house()["gold"] != g1), "the duel moves reputation or gold")
+			check(int(fx.get("race", {}).get("rep", 0)) == GameData.FESTIVAL_DUEL_REP["win"] or int(fx.get("debate", {}).get("win", 0)) == GameData.FESTIVAL_DUEL_REP["win"], "festival stakes are higher than a quay-side hail")
+			fought = true
+		if declined and fought:
+			break
+	check(got >= 2, "rivals challenge at some festivals (%d of 24)" % got)
+	# every house's leader has their own words when they hail you
+	var sim2 := Sim.new()
+	sim2.new_game(18, "iron")
+	EventBook.rival_meeting(sim2, "lamp")
+	check(str(sim2.s["event"]["text"]).contains("霍照野") and not str(sim2.s["event"]["text"]).contains("殷望舒"), "霍照野 hails an iron player in his own words")
+	EventBook.rival_meeting(sim2, "tower")
+	check(str(sim2.s["event"]["text"]).contains("殷望舒"), "殷望舒 still hails in hers")
