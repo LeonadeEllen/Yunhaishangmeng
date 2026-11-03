@@ -293,6 +293,8 @@ func cargo_used(sh: Dictionary) -> int:
 
 func cargo_cap(sh: Dictionary) -> int:
 	var base := float(GameData.SHIPS[sh["type"]]["cargo"])
+	if perk(sh["owner"]) == "ships":
+		base *= 1.1   # the shipping house packs its holds tighter
 	return int(roundf(base * (1.0 + 0.15 * float(sh.get("mods", {}).get("hold", 0)))))
 
 

@@ -33,7 +33,7 @@ static func goods_for(pid: String, i: int) -> Array:
 
 
 static func build_cost(sim: Sim, g: String, hid: String) -> int:
-	return int(float(GameData.build_cost(g)) * (0.75 if sim.perk(hid) == "industry" else 1.0))
+	return int(float(GameData.build_cost(g)) * (0.85 if sim.perk(hid) == "industry" else 1.0))
 
 
 static func upgrade_cost(sim: Sim, g: String, hid: String) -> int:

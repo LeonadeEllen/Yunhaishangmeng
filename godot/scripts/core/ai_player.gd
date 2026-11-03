@@ -231,7 +231,8 @@ static func monthly(sim: Sim, hid: String) -> void:
 		if spare > (30000.0 if style == "industry" else 50000.0) and sim.rng.randf() < 0.5:
 			_fund_works(sim, hid, spare)
 	# Keep enough for the next lighthouse stage before expanding.
-	if ships.size() < sim.max_ships(hid) and h["gold"] > sim.ship_price("galleon", hid) + WORKING_CAPITAL * (1.0 if style == "ships" else 2.0):
+	# a new hull only when the chest can also fill it: ships without trading capital just eat wages
+	if ships.size() < sim.max_ships(hid) and float(h.get("last_net", 0.0)) > 0.0 and h["gold"] > sim.ship_price("galleon", hid) + WORKING_CAPITAL * (1.5 if style == "ships" else 2.5):
 		var home: String = GameData.HOUSES[hid]["home"]
 		h["gold"] -= sim.ship_price("galleon", hid)
 		sim._add_ship(hid, "galleon", home)
