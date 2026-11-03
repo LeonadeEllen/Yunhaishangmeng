@@ -2450,10 +2450,20 @@ func _festival() -> void:
 			s["stats"]["awards"] = int(s["stats"].get("awards", 0)) + 1
 		_say("灯节 · %s，奖金 %d 金，名声 +%d。" % [a["text"], GameData.FESTIVAL_PRIZE, int(GameData.FESTIVAL_REP[a["kind"]])], "major" if a["hid"] == pid() else "rival")
 	var houses := []
+	var award_hids: Array = awards.map(func(a): return a["hid"])
+	var top := ""
+	var top_w := -1.0
+	for hid in GameData.HOUSE_IDS:
+		if not house(hid)["bankrupt"] and net_worth(hid) > top_w:
+			top_w = net_worth(hid)
+			top = hid
 	for hid in GameData.HOUSE_IDS:
 		var h := house(hid)
-		houses.append({"hid": hid, "worth": net_worth(hid), "gain": float(gains.get(hid, 0.0)), "ships": _ships_of(hid).size(),
-			"workshops": Industry.all_buildings(self, hid).size(), "bens": benefactor_ports(hid).size(), "lh": int(h["lh"]["stage"]), "bankrupt": h["bankrupt"]})
+		var row := {"hid": hid, "worth": net_worth(hid), "gain": float(gains.get(hid, 0.0)), "ships": _ships_of(hid).size(),
+			"workshops": Industry.all_buildings(self, hid).size(), "bens": benefactor_ports(hid).size(), "lh": int(h["lh"]["stage"]), "bankrupt": h["bankrupt"]}
+		if hid != pid():
+			row["say"] = leader_line(hid, award_hids, top)
+		houses.append(row)
 	var st: Dictionary = s["stats"]
 	var mine := {"gain": float(gains.get(pid(), 0.0)),
 		"trades": int(st.get("trades", 0)) - int(snap0.get("trades", 0)),
@@ -2695,6 +2705,18 @@ func _tick_crisis() -> void:
 			h["crisis"] = 0
 
 
+## One line from a rival's leader for the year review (round 24).
+func leader_line(hid: String, award_hids: Array, top: String) -> String:
+	var lines: Dictionary = GameData.LEADER_LINES[hid]
+	if house(hid)["bankrupt"]:
+		return lines["bankrupt"]
+	if s["crown"] != null:
+		return lines["crown"] if s["crown"]["hid"] == hid else lines["crown_other"]
+	if hid in award_hids:
+		return lines["award"]
+	return lines["lead"] if top == hid else lines["behind"]
+
+
 func _bankrupt(hid: String) -> void:
 	var h: Dictionary = s["houses"][hid]
 	h["bankrupt"] = true
@@ -2702,6 +2724,8 @@ func _bankrupt(hid: String) -> void:
 		_end("bankrupt", hid)
 		return
 	_say("%s 宣告破产，退出云海。" % GameData.HOUSES[hid]["name"], "major")
+	if s["event"] == null:
+		EventBook.open_farewell(self, hid)
 	s["ships"] = s["ships"].filter(func(x): return x["owner"] != hid)
 	for pid in GameData.PORT_IDS:
 		var plots: Array = s["ports"][pid]["plots"]

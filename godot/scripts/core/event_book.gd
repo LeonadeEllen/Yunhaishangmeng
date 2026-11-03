@@ -272,6 +272,13 @@ static func rival_meeting(sim: Sim, hid: String) -> void:
 	sim.s["event"] = {"id": "rival:%s" % hid, "title": "%s · %s在港" % [hh["leader"], hh["name"]], "text": text, "art": "events/14", "choices": choices}
 
 
+## A rival leader's farewell when their house goes under (round 24).
+static func open_farewell(sim: Sim, hid: String) -> void:
+	var hh: Dictionary = GameData.HOUSES[hid]
+	sim.s["event"] = {"id": "farewell:%s" % hid, "title": "%s · %s的告别" % [hh["name"], hh["leader"]], "text": GameData.LEADER_FAREWELL[hid],
+		"art": "story_letter", "choices": [{"label": "送%s一程" % hh["leader"], "effects": {"rep": 30, "say": "码头上的人都看见了，你送走了一个对手，像送一位老朋友。"}}, {"label": "各走各的路", "effects": {}}]}
+
+
 ## A rival's challenge on the night of the lantern festival (round 18).
 static func festival_challenge(sim: Sim, hid: String) -> void:
 	var hh: Dictionary = GameData.HOUSES[hid]

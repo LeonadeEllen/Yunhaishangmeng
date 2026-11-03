@@ -52,6 +52,7 @@ var hint_panel: PanelContainer
 var hint_label: Label
 var tut_skip: Button
 var fade: ColorRect              # town enter/leave transition (round 23)
+var _fx_tweens: Array = []       # cutscene tweens, killed when the modal closes
 var _season_col := Color.WHITE
 var crisis_label: Label
 var modal_layer: Control
@@ -1033,6 +1034,9 @@ func _show_festival() -> void:
 		var txt := "%s · 身家约 %s（%s）· 船 %d · 工坊 %d · 恩主 %d 城 · 灯塔 %d/3%s" % [d["name"], UiKit.money(band), _signed(floorf(float(hrow["gain"]) / 1000.0) * 1000.0), int(hrow["ships"]), int(hrow["workshops"]), int(hrow["bens"]), int(hrow["lh"]), " · 已破产" if hrow["bankrupt"] else ""]
 		hb.add_child(UiKit.label(txt, 13, UiKit.INK if mine_row else UiKit.MUTED, mine_row))
 		box.add_child(hb)
+		if hrow.has("say"):
+			var sl := UiKit.label("　　" + str(hrow["say"]), 13, Color("6b5a3e"))
+			box.add_child(sl)
 	var m: Dictionary = f["mine"]
 	box.add_child(HSeparator.new())
 	box.add_child(UiKit.label("你的这一年", 17, UiKit.INK, true))
@@ -2065,6 +2069,10 @@ func _modal(title: String, art: String, lines: Array, buttons: Array, width: int
 
 
 func _close_modal() -> void:
+	for tw in _fx_tweens:
+		if tw is Tween and tw.is_valid():
+			tw.kill()
+	_fx_tweens.clear()
 	if modal_layer == null:
 		return
 	UiKit.clear(modal_layer)
@@ -2375,6 +2383,7 @@ func _lighthouse_cutscene(stage: int) -> void:
 	v.add_child(holder)
 	v.move_child(holder, 0)
 	var tw := create_tween()
+	_fx_tweens.append(tw)
 	tw.tween_property(img, "modulate:a", 1.0, 0.3)
 	tw.parallel().tween_property(img, "scale", Vector2.ONE, 1.4).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	tw.tween_property(glow, "modulate:a", 1.0, 0.8)
@@ -2383,15 +2392,16 @@ func _lighthouse_cutscene(stage: int) -> void:
 		beam.position = Vector2(260, 40)
 		beam.rotation = -0.9
 		var bt := create_tween()
+		_fx_tweens.append(bt)
 		bt.tween_property(beam, "color:a", 0.55, 0.2)
 		bt.parallel().tween_property(beam, "rotation", 0.9, 1.6).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 		bt.tween_property(beam, "color:a", 0.0, 0.4)
 		if not is_instance_valid(glow) or not glow.is_inside_tree():
 			return
 		var pulse := create_tween().set_loops()
+		_fx_tweens.append(pulse)
 		pulse.tween_property(glow, "scale", Vector2(1.0, 1.0), 1.1).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-		pulse.tween_property(glow, "scale", Vector2(1.15, 1.15), 1.1).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-		glow.tree_exiting.connect(func(): pulse.kill()))
+		pulse.tween_property(glow, "scale", Vector2(1.15, 1.15), 1.1).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT))
 
 
 func _crown_celebration() -> void:

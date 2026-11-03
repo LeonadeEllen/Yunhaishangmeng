@@ -316,6 +316,14 @@ func run(m: Control) -> void:
 	await _wait(0.4)
 	await _shot("27_festival")
 	main._close_modal()
+	# round 24: a rival's farewell
+	main.sim.s["event"] = null
+	EventBook.open_farewell(main.sim, "tower")
+	main._show_event()
+	await _wait(0.4)
+	await _shot("38_farewell")
+	main._choose_event(1)
+	main._close_modal()
 	main.sim.s["event"] = null
 	EventBook.festival_challenge(main.sim, "iron")
 	main._show_event()

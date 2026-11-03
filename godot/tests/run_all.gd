@@ -18,6 +18,7 @@ func _init() -> void:
 		test_quests()
 		test_festival_challenge()
 		test_milestones()
+		test_leaders()
 		print("FAILURES: %d" % failures)
 		quit(1 if failures > 0 else 0)
 		return
@@ -39,6 +40,7 @@ func _init() -> void:
 	test_quests()
 	test_festival_challenge()
 	test_milestones()
+	test_leaders()
 	var seeds := [11, 22, 33, 44, 55]
 	var crowns := 0
 	var bot_stage := 0
@@ -1074,3 +1076,34 @@ func test_festival_challenge() -> void:
 	check(str(sim2.s["event"]["text"]).contains("霍照野") and not str(sim2.s["event"]["text"]).contains("殷望舒"), "霍照野 hails an iron player in his own words")
 	EventBook.rival_meeting(sim2, "tower")
 	check(str(sim2.s["event"]["text"]).contains("殷望舒"), "殷望舒 still hails in hers")
+
+
+func test_leaders() -> void:
+	print("rival leaders speak at the review and say goodbye when they go under")
+	var sim := Sim.new()
+	sim.new_game(24)
+	sim.s["story"] = 3
+	sim.s["day"] = GameData.DAYS_YEAR - 1
+	sim.s["event"] = null
+	sim.advance_day()
+	var f = sim.s["festival_show"]
+	var said := 0
+	for row in f["houses"]:
+		if row["hid"] != sim.pid():
+			check(row.has("say") and str(row["say"]).contains(GameData.HOUSES[row["hid"]]["leader"]), "%s has a line of their own" % GameData.HOUSES[row["hid"]]["leader"])
+			said += 1
+		else:
+			check(not row.has("say"), "the player's row has no line")
+	check(said == 2, "both rivals speak")
+	check(sim.leader_line("iron", ["iron"], "tower") == GameData.LEADER_LINES["iron"]["award"] and sim.leader_line("iron", [], "iron") == GameData.LEADER_LINES["iron"]["lead"] and sim.leader_line("iron", [], "tower") == GameData.LEADER_LINES["iron"]["behind"], "a prize, the lead or trailing each get their own words")
+	sim.s["crown"] = {"hid": "tower", "day": 1}
+	check(sim.leader_line("tower", [], "") == GameData.LEADER_LINES["tower"]["crown"] and sim.leader_line("iron", [], "") == GameData.LEADER_LINES["iron"]["crown_other"], "the crown changes what everyone says")
+	sim.s["crown"] = null
+	# a farewell when a rival goes under
+	sim.s["event"] = null
+	sim.s["festival_show"] = null
+	var r0: int = sim.house()["rep"]
+	sim._bankrupt("iron")
+	check(sim.house("iron")["bankrupt"] and sim.s["event"] != null and str(sim.s["event"]["id"]) == "farewell:iron" and str(sim.s["event"]["text"]).contains("韦朔"), "韦朔 says goodbye when 铁誓舰团 goes under")
+	check(EventBook.resolve(sim, 0)["ok"] and sim.house()["rep"] == r0 + 30, "seeing him off is worth a little reputation")
+	check(sim.leader_line("iron", [], "") == GameData.LEADER_LINES["iron"]["bankrupt"], "his empty seat is remembered at the next review")

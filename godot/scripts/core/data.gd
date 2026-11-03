@@ -298,6 +298,41 @@ const FESTIVAL_SELL := 1.15
 const RIVAL_RACE := 0.08             # two rival ships in one port may race each other
 const RIVAL_RACE_GAP := 30
 const RIVAL_RACE_STAKE := 1500
+## What each house leader says at the year review, by their situation (round 24).
+const LEADER_LINES := {
+	"lamp": {
+		"award": "霍照野举着灯笼笑：「灯油行会的灯，今年照得最远。」",
+		"lead": "霍照野把账本合上：「生意嘛，谁的灯亮谁说话。」",
+		"behind": "霍照野摸着下巴：「今年让你们跑在前头，明年再说。」",
+		"crown": "霍照野望着灯冠：「这盏灯，我点了半辈子。」",
+		"crown_other": "霍照野看着别人的灯冠，半晌只说：「亮是真亮。」",
+		"bankrupt": "霍照野的位子空着，桌上留了一盏没点的灯。",
+	},
+	"iron": {
+		"award": "韦朔把奖杯往桌上一放：「船快，没什么好说的。」",
+		"lead": "韦朔哈哈大笑：「追得上我的船再来谈生意。」",
+		"behind": "韦朔盯着自己的酒碗：「风向不对。明年换条航线。」",
+		"crown": "韦朔站在灯冠下，第一次没有大声说话。",
+		"crown_other": "韦朔朝灯冠举了举碗：「算你赢。再赛一程？」",
+		"bankrupt": "韦朔的位子空着，有人说他驾着最后一艘船往东去了。",
+	},
+	"tower": {
+		"award": "殷望舒合上扇子：「数字不会说谎，今年它站在我这边。」",
+		"lead": "殷望舒微微一笑：「各位的账，我都替你们算过了。」",
+		"behind": "殷望舒的扇子停了一下：「有意思。我漏算了什么？」",
+		"crown": "殷望舒望着灯冠，轻声说：「议士们，可以散会了。」",
+		"crown_other": "殷望舒向灯冠的主人欠身：「这一局，你算得比我准。」",
+		"bankrupt": "殷望舒的位子空着，扇子留在桌上，没人敢动。",
+	},
+}
+
+## A leader's last words when their house goes under (round 24).
+const LEADER_FAREWELL := {
+	"lamp": "霍照野把最后一盏灯油交到你手里：「灯油行会没了，灯还得有人点。千旗市的老伙计们，拜托你照应。」",
+	"iron": "韦朔站在最后一艘飞艇的船头，朝你喊：「铁誓舰团散了，船还在！下次在云海上碰见，别认错人。」",
+	"tower": "殷望舒把一叠账本放在你桌上：「白塔议士散会了。这些是十年的行情，留给算得比我准的人。」",
+}
+
 ## Milestones: the small satisfactions on the road to the crown (round 21). Checked daily; each gives reputation once.
 const MILESTONE_REP := 20
 const MILESTONES := [
