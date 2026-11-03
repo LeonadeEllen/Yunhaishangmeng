@@ -31,6 +31,7 @@ var map: Control
 var town: Control
 var battle_view: Control
 var hero_btn: Button
+var crew_btn: Button
 var hud: Control
 var top_gold: Label
 var top_net: Label
@@ -210,6 +211,7 @@ func _show_help() -> void:
 		"· 城镇：旗舰进港后会走进城里。WASD 走动，点建筑进门办事，Esc 回到海图。路人会透露行情。",
 		"· 主角：卖货、航行、委托和建坊都涨经验，升级得能力点，点顶栏的名字分配到航海 / 交易 / 魅力。",
 		"· 航行与空战：季风随季节转向，顺风航程更短。载货航行可能遇上云盗：应战、交过路费或甩开。空战是回合制六角格：炮击、接舷、修补、防御、撤退，主角升级学会指挥战术。酒馆有剿匪悬赏。",
+		"· 伙伴：酒馆、船坞、行会里能遇到 12 位各有专长的人物，付安家费招入商会，每月发薪。安排岗位（航海长、账房、炮术长、接舷队长、船长）吃他们的能力加成；一起航行、打赢云盗、送礼都涨好感，好感到了会触发三章个人剧情，走完专长更强。",
 		"· 时间：空格暂停，1/2/3 切换速度。旗舰抵港时自动暂停。",
 		"· 灯塔：三层灯塔是云海盟主的象征，不建也可以一直玩下去。金币为负超过 30 天会破产。",
 	], [["明白了", func(): _close_modal()]])
@@ -348,7 +350,7 @@ func _build_topbar() -> void:
 	bar.custom_minimum_size = Vector2(0, 64)
 	add_child(bar)
 	var h := HBoxContainer.new()
-	h.add_theme_constant_override("separation", 18)
+	h.add_theme_constant_override("separation", 14)
 	bar.add_child(h)
 	h.add_child(UiKit.icon(UiKit.sprite("emblems", GameData.HOUSES[sim.pid()]["emblem"]), 40))
 	h.add_child(UiKit.label(GameData.HOUSES[sim.pid()]["name"], 22, Color("f3e3b3"), true))
@@ -366,6 +368,9 @@ func _build_topbar() -> void:
 	hero_btn = UiKit.button("", _show_hero, true)
 	hero_btn.tooltip_text = "主角能力与经验"
 	h.add_child(hero_btn)
+	crew_btn = UiKit.button("", _show_crew, true)
+	crew_btn.tooltip_text = "伙伴：岗位、好感与个人剧情"
+	h.add_child(crew_btn)
 	var sp := Control.new()
 	sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	h.add_child(sp)
@@ -513,7 +518,10 @@ func _refresh_top() -> void:
 	top_debt.text = ("欠款 %s" % UiKit.money(h["debt"])) if h["debt"] > 0.5 else ""
 	top_date.text = GameData.date_text(sim.s["day"])
 	var hero: Dictionary = sim.hero()
-	hero_btn.text = "%s · %d 级%s" % [GameData.HOUSES[sim.pid()]["leader"], int(hero["lvl"]), (" · %d 点待分配" % int(hero["pts"])) if int(hero["pts"]) > 0 else ""]
+	hero_btn.text = "%s %d 级%s" % [GameData.HOUSES[sim.pid()]["leader"], int(hero["lvl"]), (" · %d 点" % int(hero["pts"])) if int(hero["pts"]) > 0 else ""]
+	hero_btn.tooltip_text = "主角能力与经验" + ("（有 %d 点能力点待分配）" % int(hero["pts"]) if int(hero["pts"]) > 0 else "")
+	crew_btn.text = "伙伴 %d" % sim.crew().size()
+	crew_btn.visible = not sim.crew().is_empty() or int(hero["lvl"]) >= 2
 	if int(hero["pts"]) > 0 and not hero_btn.has_meta("pulsing"):
 		hero_btn.set_meta("pulsing", true)
 		_pulse(hero_btn)
@@ -873,6 +881,9 @@ func _greeting(kind: String) -> String:
 		"guild":
 			return "图纸不外传，除非你证明经手过足够的料。" if sim.rep_level() < 3 else "行首请看，工艺图纸都在墙上。"
 		"tavern":
+			var rc := sim.recruitable_at(_port, "tavern")
+			if not rc.is_empty():
+				return "来壶霞果酒？角落里那位%s像是在等人。" % Characters.CHARS[rc[0]]["title"]
 			return "来壶霞果酒？委托板在那边，消息也有的是。"
 		"bank":
 			return "存取借贷都在这里办，利息按月算。"
@@ -1113,6 +1124,7 @@ func _tab_yard(here: bool) -> void:
 		side_body.add_child(UiKit.para("改造在船坞做，每项最高 3 级。物料先用船上的，再用商馆里的，不够就按市价买。", 13, UiKit.MUTED))
 		for sh in mine:
 			side_body.add_child(_ship_card(sh))
+	_recruit_rows("yard")
 
 
 func _tab_post(here: bool) -> void:
@@ -1387,6 +1399,7 @@ func _tab_guild() -> void:
 		mine.append(GameData.good_name(g))
 	side_body.add_child(HSeparator.new())
 	side_body.add_child(UiKit.label("你持有的图纸：" + ("、".join(mine) if not mine.is_empty() else "无"), 12, UiKit.MUTED))
+	_recruit_rows("guild")
 
 
 func _tab_tavern() -> void:
@@ -1417,6 +1430,7 @@ func _tab_tavern() -> void:
 		row.add_child(UiKit.button("放弃" if taken else "接下", func(): _act(sim.take_bounty(cid)); _refresh_side(), taken))
 		p.add_child(row)
 		side_body.add_child(p)
+	_recruit_rows("tavern")
 	side_body.add_child(HSeparator.new())
 	side_body.add_child(UiKit.label("酒馆", 18, UiKit.INK, true))
 	side_body.add_child(UiKit.para("消息贩子能告诉你所有港口此刻的价格。行情会变，过期的情报要小心。", 14, UiKit.MUTED))
@@ -1650,6 +1664,133 @@ func _choose_event(idx: int) -> void:
 		_toast(res["msg"], "info")
 	if sim.s["event"] != null:
 		_show_event()
+
+
+func _recruit_rows(where: String) -> void:
+	var rc := sim.recruitable_at(_port, where)
+	if rc.is_empty():
+		return
+	side_body.add_child(HSeparator.new())
+	side_body.add_child(UiKit.label("在这里能遇到的人", 16, UiKit.INK, true))
+	for cid in rc:
+		side_body.add_child(_char_card(cid, where))
+
+
+func _abil_text(cid: String) -> String:
+	var a: Dictionary = Characters.CHARS[cid]["abil"]
+	return "航海 %d · 交易 %d · 战斗 %d · 魅力 %d" % [int(a["sail"]), int(a["trade"]), int(a["fight"]), int(a["charm"])]
+
+
+func _char_card(cid: String, where: String) -> Control:
+	var c: Dictionary = Characters.CHARS[cid]
+	var box := PanelContainer.new()
+	box.add_theme_stylebox_override("panel", UiKit.box(Color("fbf5e6"), Color(UiKit.BRASS, 0.55), 6, 1, 8))
+	var hb := HBoxContainer.new()
+	hb.add_theme_constant_override("separation", 10)
+	box.add_child(hb)
+	hb.add_child(UiKit.icon(UiKit.sprite("leaders", Characters.PORTRAITS[cid]), 64))
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 1)
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	v.add_child(UiKit.label("%s · %s" % [c["name"], c["title"]], 15, UiKit.INK, true))
+	var st := UiKit.label(c["style"], 12, UiKit.MUTED)
+	st.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	v.add_child(st)
+	v.add_child(UiKit.label(_abil_text(cid), 12, UiKit.INK))
+	var sp := UiKit.label("专长「%s」：%s" % [c["spec_name"], c["spec_desc"]], 12, UiKit.JADE)
+	sp.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	v.add_child(sp)
+	var ok := sim.recruit_ok(cid, _port, where)
+	v.add_child(UiKit.label("条件：%s · 安家费 %s 金 · 月薪 %d" % [Characters.cond_text(cid), UiKit.money(c["fee"]), int(c["wage"])] + ("" if ok["ok"] else " · " + ok["msg"]), 12, UiKit.MUTED if ok["ok"] else UiKit.TERRA))
+	hb.add_child(v)
+	var b := UiKit.button("招募", func(): _act(sim.recruit(cid, _port, where)); _refresh_all())
+	b.disabled = not ok["ok"]
+	b.tooltip_text = ok.get("msg", "")
+	hb.add_child(b)
+	return box
+
+
+func _show_crew() -> void:
+	var v := _modal("伙伴 · %d / %d" % [sim.crew().size(), sim.crew_cap()], "", [
+		"岗位加成来自各人的能力；送礼（%d 金，每月一次）、一起航行、打赢云盗、完成委托都涨好感，好感到 %d / %d / %d 会在港口触发个人剧情，走完三章专长更强。每月薪水合计 %d 金。" % [Characters.GIFT_COST, Characters.CHAPTER_AFF[0], Characters.CHAPTER_AFF[1], Characters.CHAPTER_AFF[2], sim.crew_wages()],
+	], [["关闭", func(): _close_modal()]], 760)
+	var list := VBoxContainer.new()
+	list.add_theme_constant_override("separation", 6)
+	if sim.crew().is_empty():
+		list.add_child(UiKit.para("还没有伙伴。去各城的酒馆、船坞和行会看看，有人在等一个像样的商会。", 14, UiKit.MUTED))
+	for cid in Characters.IDS:
+		if not sim.crew().has(cid):
+			continue
+		var c: Dictionary = Characters.CHARS[cid]
+		var m: Dictionary = sim.crew()[cid]
+		var box := PanelContainer.new()
+		box.add_theme_stylebox_override("panel", UiKit.box(Color("fbf5e6"), Color(UiKit.BRASS, 0.5), 6, 1, 8))
+		var hb := HBoxContainer.new()
+		hb.add_theme_constant_override("separation", 10)
+		box.add_child(hb)
+		hb.add_child(UiKit.icon(UiKit.sprite("leaders", Characters.PORTRAITS[cid]), 60))
+		var col := VBoxContainer.new()
+		col.add_theme_constant_override("separation", 1)
+		col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		col.add_child(UiKit.label("%s · %s · 剧情 %d/3" % [c["name"], c["title"], int(m["chapter"])], 15, UiKit.INK, true))
+		col.add_child(UiKit.label(_abil_text(cid) + " · 月薪 %d" % int(c["wage"]), 12, UiKit.MUTED))
+		col.add_child(UiKit.label("专长「%s」%s：%s" % [c["spec_name"], "★" if int(m["spec_lvl"]) >= 2 else "", c["spec_desc"]], 12, UiKit.JADE))
+		var bar := ProgressBar.new()
+		bar.max_value = 100
+		bar.value = int(m["aff"])
+		bar.show_percentage = false
+		bar.custom_minimum_size = Vector2(0, 8)
+		col.add_child(bar)
+		var nxt := ""
+		if int(m["chapter"]) < 3:
+			nxt = " · 下一章 %d" % Characters.CHAPTER_AFF[int(m["chapter"])]
+		col.add_child(UiKit.label("好感 %d%s" % [int(m["aff"]), nxt], 12, UiKit.MUTED))
+		hb.add_child(col)
+		var ctl := VBoxContainer.new()
+		ctl.add_theme_constant_override("separation", 4)
+		var ob := OptionButton.new()
+		var opts := [["", "无岗位"]]
+		for pk in Characters.POSTS:
+			if pk == "captain":
+				for sh in sim.ships_of():
+					if not sh["flagship"]:
+						opts.append(["captain:%d" % int(sh["id"]), "船长 · %s" % sh["name"]])
+			else:
+				opts.append([pk, "%s（%s）" % [Characters.POSTS[pk]["name"], Characters.POSTS[pk]["desc"]]])
+		var cur_key: String = m["post"] + (":%d" % int(m["ship"]) if m["post"] == "captain" else "")
+		for i in opts.size():
+			ob.add_item(opts[i][1])
+			if opts[i][0] == cur_key:
+				ob.select(i)
+		var ccid: String = cid
+		ob.item_selected.connect(func(i):
+			var key: String = opts[i][0]
+			if key.begins_with("captain:"):
+				_act(sim.set_post(ccid, "captain", int(key.substr(8))))
+			else:
+				_act(sim.set_post(ccid, key))
+			_show_crew())
+		ctl.add_child(ob)
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 4)
+		var gb := UiKit.button("送礼 %d" % Characters.GIFT_COST, func(): _act(sim.gift(ccid)); _show_crew(), true)
+		gb.disabled = int(m["gift_month"]) == int(sim.s["day"]) / GameData.DAYS_MONTH or sim.house()["gold"] < Characters.GIFT_COST
+		gb.add_theme_font_size_override("font_size", 12)
+		row.add_child(gb)
+		var db := UiKit.button("辞退", func(): _act(sim.dismiss(ccid)); _show_crew(), true)
+		db.add_theme_font_size_override("font_size", 12)
+		db.tooltip_text = "辞退后不会再回来。"
+		row.add_child(db)
+		ctl.add_child(row)
+		hb.add_child(ctl)
+		list.add_child(box)
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.custom_minimum_size = Vector2(740, minf(560.0, 20.0 + 128.0 * maxf(1.0, float(sim.crew().size()))))
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(list)
+	v.add_child(scroll)
+	v.move_child(scroll, v.get_child_count() - 2)
 
 
 func _show_encounter() -> void:

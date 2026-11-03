@@ -23,7 +23,8 @@ func setup(player: Array, enemy: Array, hero: Dictionary, seed_value: int, diffi
 	rng.seed = seed_value
 	b = {
 		"round": 0, "units": [], "terrain": {}, "smoke": {}, "order": [], "cur": -1,
-		"cp": 0, "cp_max": 1 + (int(hero.get("fight", 1)) - 1) / 4, "fight": int(hero.get("fight", 1)),
+		"cp": 0, "cp_max": 1 + (int(hero.get("fight", 1)) - 1) / 4 + int(hero.get("cp_bonus", 0)), "fight": int(hero.get("fight", 1)),
+		"fire_mult": float(hero.get("fire_mult", 1.0)), "board_mult": float(hero.get("board_mult", 1.0)),
 		"hero_lvl": int(hero.get("lvl", 1)), "used": [], "focus": -1, "bonus_move": 0,
 		"log": [], "events": [], "over": "", "difficulty": difficulty,
 	}
@@ -44,7 +45,7 @@ func setup(player: Array, enemy: Array, hero: Dictionary, seed_value: int, diffi
 			u["defend"] = false
 			u["taken"] = false
 			u["half"] = false
-			u["morale"] = (70 + 2 * int(b["fight"])) if side == 0 else (60 + 5 * difficulty)
+			u["morale"] = (70 + 2 * int(b["fight"]) + int(hero.get("morale_bonus", 0))) if side == 0 else (60 + 5 * difficulty)
 			var front: bool = u.get("slot", "main") == "van"
 			var col := (1 if front else 0) if side == 0 else (W - 2 if front else W - 1)
 			var row := -1
@@ -478,7 +479,7 @@ func board(uid: int, tid: int) -> Dictionary:
 	if int(u["crew"]) <= 0:
 		return _fail("船员已经打光了。")
 	u["acted"] = true
-	var att := float(u["crew"]) * _fight_bonus(u) * rng.randf_range(0.8, 1.2)
+	var att := float(u["crew"]) * _fight_bonus(u) * rng.randf_range(0.8, 1.2) * (float(b.get("board_mult", 1.0)) if int(u["home"]) == 0 else 1.0)
 	var def := float(t["crew"]) * _fight_bonus(t) * (1.3 if t["defend"] else 1.0) * rng.randf_range(0.8, 1.2)
 	var win := att >= def
 	var u_loss := int(ceil(float(u["crew"]) * (0.15 if win else 0.3)))
@@ -643,6 +644,8 @@ func _fire_estimate(u: Dictionary, t: Dictionary, d: int, roll: float = 1.0) -> 
 		base *= 0.5
 	if int(u["side"]) == 0 and int(b["focus"]) == int(t["id"]):
 		base *= 1.5
+	if int(u["home"]) == 0:
+		base *= float(b.get("fire_mult", 1.0))
 	return maxi(1, int(roundf(base * roll)))
 
 

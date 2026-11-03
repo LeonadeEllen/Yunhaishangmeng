@@ -181,6 +181,34 @@ func run(m: Control) -> void:
 	main._open_port(main.sim.flagship()["port"], 5)
 	await _wait(0.3)
 	await _shot("16e_bounty")
+	# companions
+	main.sim.house()["gold"] += 20000
+	main.sim.s["story"] = 1
+	main.sim.house()["rep"] = 700
+	main._open_port("muxia", 5)
+	await _wait(0.3)
+	await _shot("17_tavern_recruit")
+	main.sim.recruit("xiaoman", "muxia", "tavern")
+	main.sim.recruit("qian", "qianqi", "tavern")
+	main.sim.recruit("luqing", "xiajing", "tavern")
+	main.sim.recruit("aman", "muxia", "tavern")
+	main.sim.set_post("qian", "acct")
+	main.sim.set_post("luqing", "nav")
+	main.sim.set_post("aman", "gunner")
+	main.sim.crew()["luqing"]["aff"] = 48
+	main.sim.crew()["luqing"]["chapter"] = 1
+	main._refresh_all()
+	main._show_crew()
+	await _wait(0.4)
+	await _shot("17b_crew")
+	main._close_modal()
+	main.sim.crew()["xiaoman"]["aff"] = 30
+	main.sim._tick_crew()
+	main._show_event()
+	await _wait(0.4)
+	await _shot("17c_chapter")
+	main._choose_event(0)
+	main._close_modal()
 	main.sim.s["crown"] = {"hid": main.sim.pid(), "day": main.sim.s["day"]}
 	main._crown_celebration()
 	await _wait(0.4)

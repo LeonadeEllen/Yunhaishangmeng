@@ -85,7 +85,7 @@ func add_exp(n: int) -> void:
 	if n <= 0:
 		return
 	var h: Dictionary = s["hero"]
-	h["exp"] = int(h["exp"]) + n
+	h["exp"] = int(h["exp"]) + int(roundf(float(n) * (1.0 + 0.1 * spec_bonus("research"))))
 	while int(h["lvl"]) < GameData.HERO_MAX_LVL and int(h["exp"]) >= GameData.hero_exp_needed(int(h["lvl"])):
 		h["exp"] = int(h["exp"]) - GameData.hero_exp_needed(int(h["lvl"]))
 		h["lvl"] = int(h["lvl"]) + 1
@@ -115,6 +115,7 @@ func travel_days(from: String, to: String, type: String, hid: String = "", sh: D
 		d /= speed_mult(sh)
 	if hid == pid():
 		d *= 1.0 - 0.03 * float(hero_abil("sail") - 1)
+		d *= (1.0 - 0.01 * float(post_level("nav"))) * (1.0 - 0.03 * spec_bonus("fog_nav")) * (1.0 - 0.05 * spec_bonus("survey"))
 	d *= GameData.wind_factor(from, to, int(s.get("day", 0)))
 	return maxi(1, int(roundf(d)))
 
@@ -152,6 +153,7 @@ func new_game(seed_value: int = 0, player: String = "lamp", difficulty: int = 1)
 		"tutorial": 0, "player": player, "fashion": null, "difficulty": difficulty,
 		"contracts": [], "next_contract_id": 1,
 		"encounter": null, "battle": null, "battle_result": null,
+		"crew": {}, "roam": {"port": "", "until": 0},
 	}
 	for pid in GameData.PORT_IDS:
 		var p: Dictionary = GameData.PORTS[pid]
@@ -257,6 +259,13 @@ func mod_lvl(sh: Dictionary, k: String) -> int:
 
 ## Speed multiplier from refits: sails help, the first hold extension drags.
 func speed_mult(sh: Dictionary) -> float:
+	var cap := 1.0
+	if sh["owner"] == pid():
+		cap += 0.015 * float(captain_level(int(sh["id"])))
+	return cap * _speed_mult_base(sh)
+
+
+func _speed_mult_base(sh: Dictionary) -> float:
 	return (1.0 + 0.1 * float(mod_lvl(sh, "sail"))) * (0.92 if mod_lvl(sh, "hold") > 0 else 1.0)
 
 
@@ -356,7 +365,7 @@ func rename_ship(ship_id: int, new_name: String) -> Dictionary:
 func refit_cost(sh: Dictionary, k: String) -> Dictionary:
 	var r: Dictionary = GameData.REFITS[k]
 	var lvl := mod_lvl(sh, k)
-	var gold := int(float(GameData.SHIPS[sh["type"]]["price"]) * float(r["gold"]) * float(lvl + 1))
+	var gold := int(float(GameData.SHIPS[sh["type"]]["price"]) * float(r["gold"]) * float(lvl + 1) * (1.0 - 0.25 * spec_bonus("shipwright")))
 	var mats := {}
 	for g in r["mats"]:
 		mats[g] = int(r["mats"][g]) * (lvl + 1)
@@ -447,6 +456,7 @@ func _discount(hid: String, port: String) -> float:
 	var d := GameData.PATRON_FEE if pat != "" and pat != hid else 1.0
 	if hid == pid():
 		d *= 1.0 - 0.01 * float(hero_abil("trade") - 1)
+		d *= (1.0 - 0.004 * float(post_level("acct"))) * (1.0 - 0.03 * spec_bonus("haggle"))
 	return d
 
 
@@ -484,13 +494,20 @@ func _sell_mult(hid: String) -> float:
 		m *= AI_BONUS[clampi(int(s.get("difficulty", 1)), 0, 2)]
 	else:
 		m *= 1.0 + 0.01 * float(hero_abil("trade") - 1)
+		m *= 1.0 + 0.004 * float(post_level("acct"))
 	return m
 
 
 func sell_price(port: String, good: String, hid: String = "") -> int:
 	if hid == "":
 		hid = pid()
-	return int(roundf(unit_price(port, good) * _sell_mult(hid)))
+	var m := _sell_mult(hid)
+	if hid == pid():
+		if port == "hongxiao":
+			m *= 1.0 + 0.05 * spec_bonus("blackmarket")
+		if GameData.tier(good) == 3:
+			m *= 1.0 + 0.08 * spec_bonus("foreign")
+	return int(roundf(unit_price(port, good) * m))
 
 
 ## Quote buying `qty` units: price climbs as stock drops. Returns {qty, cost}.
@@ -768,7 +785,7 @@ func _remove_ship(sh: Dictionary) -> void:
 
 
 func repair_cost(sh: Dictionary) -> int:
-	return int(roundf(float(GameData.SHIPS[sh["type"]]["price"]) * float(sh.get("dmg", 0)) / 100.0 * GameData.REPAIR_RATE))
+	return int(roundf(float(GameData.SHIPS[sh["type"]]["price"]) * float(sh.get("dmg", 0)) / 100.0 * GameData.REPAIR_RATE * (1.0 - 0.25 * spec_bonus("shipwright"))))
 
 
 ## Pay the yard to mend battle damage at once (a docked ship also mends a little every day).
@@ -916,8 +933,9 @@ func buy_craft_bp(good: String) -> Dictionary:
 	if not r["ok"]:
 		return r
 	var h := house()
-	h["gold"] -= GameData.CRAFT_BP_COST
-	h["month_out"] += GameData.CRAFT_BP_COST
+	var cost := bp_cost(GameData.CRAFT_BP_COST)
+	h["gold"] -= cost
+	h["month_out"] += cost
 	h["bp"][good] = true
 	add_rep(pid(), 40)
 	return {"ok": true, "msg": "买下%s的工艺图纸。" % GameData.good_name(good)}
@@ -944,8 +962,9 @@ func buy_secret_bp(port: String, good: String) -> Dictionary:
 	if not r["ok"]:
 		return r
 	var h := house()
-	h["gold"] -= GameData.SECRET_BP_COST
-	h["month_out"] += GameData.SECRET_BP_COST
+	var cost := bp_cost(GameData.SECRET_BP_COST)
+	h["gold"] -= cost
+	h["month_out"] += cost
 	h["bp"][good] = true
 	add_rep(pid(), 120)
 	_say("%s 的行会把%s的秘传图纸交给了你。" % [GameData.port_name(port), GameData.good_name(good)], "major")
@@ -1036,6 +1055,8 @@ func fulfill(ship_id: int, cid: int) -> Dictionary:
 		s["stats"]["contracts"] = int(s["stats"].get("contracts", 0)) + 1
 		add_friend(c["port"], hid, 60)
 		add_exp(60)
+		for mate in s["crew"]:
+			add_affinity(mate, 4)
 	var msg := "%s 完成了 %s 的委托（%s %d 件），获得 %d 金。" % [GameData.HOUSES[hid]["name"], GameData.port_name(c["port"]), GameData.good_name(c["good"]), int(c["qty"]), int(c["reward"])]
 	_say(msg, "good" if hid == pid() else "major")
 	return {"ok": true, "msg": msg, "profit": profit}
@@ -1243,6 +1264,233 @@ func _say(text: String, kind: String = "info") -> void:
 	message.emit(text, kind)
 
 
+# ---------------------------------------------------------------- companions (伙伴)
+
+func crew() -> Dictionary:
+	return s["crew"]
+
+
+func crew_cap() -> int:
+	return Characters.CREW_CAP[clampi(rep_level() - 1, 0, 5)]
+
+
+func crew_wages() -> int:
+	var w := 0
+	for cid in s["crew"]:
+		w += int(Characters.CHARS[cid]["wage"])
+	return w
+
+
+## Strength of a companion's special perk: 0 when absent, 1.0 normally, 1.5 after their story.
+func spec_bonus(spec: String) -> float:
+	for cid in s["crew"]:
+		if Characters.CHARS[cid]["spec"] == spec:
+			return 1.5 if int(s["crew"][cid].get("spec_lvl", 1)) >= 2 else 1.0
+	return 0.0
+
+
+## Ability level of whoever holds a fleet post (0 when vacant).
+func post_level(post: String) -> int:
+	for cid in s["crew"]:
+		if s["crew"][cid]["post"] == post:
+			return int(Characters.CHARS[cid]["abil"][Characters.POSTS[post]["abil"]])
+	return 0
+
+
+func captain_level(ship_id: int) -> int:
+	for cid in s["crew"]:
+		var m: Dictionary = s["crew"][cid]
+		if m["post"] == "captain" and int(m["ship"]) == ship_id:
+			return int(Characters.CHARS[cid]["abil"]["sail"])
+	return 0
+
+
+func post_holder(post: String, ship_id: int = -1) -> String:
+	for cid in s["crew"]:
+		var m: Dictionary = s["crew"][cid]
+		if m["post"] == post and (post != "captain" or int(m["ship"]) == ship_id):
+			return cid
+	return ""
+
+
+## Hero block handed to a battle: command points, morale and gunnery/boarding from the crew.
+func battle_hero() -> Dictionary:
+	return {
+		"fight": hero_abil("fight"), "lvl": int(s["hero"]["lvl"]),
+		"fire_mult": 1.0 + 0.025 * float(post_level("gunner")) + 0.15 * spec_bonus("gunnery"),
+		"board_mult": 1.0 + 0.03 * float(post_level("boarder")) + 0.2 * spec_bonus("boarding"),
+		"cp_bonus": 1 if spec_bonus("spirit") > 0.0 else 0,
+		"morale_bonus": int(10.0 * spec_bonus("spirit")),
+	}
+
+
+func bp_cost(base: int) -> int:
+	return int(roundf(float(base) * (1.0 - 0.25 * spec_bonus("research"))))
+
+
+## Can this companion be hired here? {ok, msg}
+func recruit_ok(cid: String, port: String, where: String) -> Dictionary:
+	var c: Dictionary = Characters.CHARS[cid]
+	if s["crew"].has(cid):
+		return _fail("已经在你的商会。")
+	if s.get("fired", {}).has(cid):
+		return _fail("%s 不愿再回来了。" % c["name"])
+	if c["where"] == "roam":
+		if s["roam"]["port"] != port or where != "tavern" or int(s["roam"]["until"]) < int(s["day"]):
+			return _fail("不在这里。")
+	elif c["where"] == "any":
+		if where != "tavern":
+			return _fail("不在这里。")
+	elif c["where"] != where or c["port"] != port:
+		return _fail("不在这里。")
+	var cond: Dictionary = c["cond"]
+	if cond.has("story") and int(s["story"]) < int(cond["story"]):
+		return _fail("还没到相遇的时候。")
+	if cond.has("rep") and rep_level() < int(cond["rep"]):
+		return _fail("名声要到「%s」。" % GameData.REP_NAMES[int(cond["rep"]) - 1])
+	if cond.has("friend") and friend_level(port) < int(cond["friend"]):
+		return _fail("本城友好度要到「%s」。" % GameData.FRIEND_NAMES[int(cond["friend"])])
+	if cond.has("wins") and int(s["stats"].get("wins", 0)) < int(cond["wins"]):
+		return _fail("先打赢一场云盗。")
+	if cond.has("visited") and s["hero"]["visited"].size() < int(cond["visited"]):
+		return _fail("先走遍全部港口（%d/%d）。" % [s["hero"]["visited"].size(), int(cond["visited"])])
+	if cond.has("craft_bp"):
+		var n := 0
+		for g in house()["bp"]:
+			if GameData.tier(g) == 2:
+				n += 1
+		if n < int(cond["craft_bp"]):
+			return _fail("先买一份工艺图纸。")
+	if cond.has("workshops") and Industry.all_buildings(self, pid()).size() < int(cond["workshops"]):
+		return _fail("先建 %d 座工坊。" % int(cond["workshops"]))
+	if s["crew"].size() >= crew_cap():
+		return _fail("伙伴已满（%d 人，名声更高才能多带）。" % crew_cap())
+	if house()["gold"] < int(c["fee"]):
+		return _fail("安家费 %d 金，金币不足。" % int(c["fee"]))
+	return {"ok": true, "msg": ""}
+
+
+## Companions on offer in a building (those present, whether or not you qualify yet).
+func recruitable_at(port: String, where: String) -> Array:
+	var out := []
+	for cid in Characters.IDS:
+		if s["crew"].has(cid) or s.get("fired", {}).has(cid):
+			continue
+		var c: Dictionary = Characters.CHARS[cid]
+		var here := false
+		match c["where"]:
+			"roam":
+				here = where == "tavern" and s["roam"]["port"] == port and int(s["roam"]["until"]) >= int(s["day"])
+			"any":
+				here = where == "tavern" and int(s["stats"].get("wins", 0)) >= 1
+			_:
+				here = c["where"] == where and c["port"] == port
+		if here and (not c["cond"].has("story") or int(s["story"]) >= int(c["cond"]["story"])):
+			out.append(cid)
+	return out
+
+
+func recruit(cid: String, port: String, where: String) -> Dictionary:
+	var ok := recruit_ok(cid, port, where)
+	if not ok["ok"]:
+		return ok
+	var c: Dictionary = Characters.CHARS[cid]
+	house()["gold"] -= float(c["fee"])
+	house()["month_out"] += float(c["fee"])
+	s["crew"][cid] = {"aff": 10, "post": "", "ship": -1, "chapter": 0, "joined": int(s["day"]), "gift_month": -1, "spec_lvl": 1}
+	var msg := "%s 加入了商会。" % c["name"]
+	if c["spec"] == "shipwright" and not has_bp("astro"):
+		house()["bp"]["astro"] = true
+		msg += "他带来了星盘的秘传图纸。"
+	_say(msg, "good")
+	return {"ok": true, "msg": msg}
+
+
+func dismiss(cid: String) -> Dictionary:
+	if not s["crew"].has(cid):
+		return _fail("没有这个人。")
+	s["crew"].erase(cid)
+	if not s.has("fired"):
+		s["fired"] = {}
+	s["fired"][cid] = true
+	_say("%s 离开了商会。" % Characters.name_of(cid), "info")
+	return {"ok": true, "msg": "%s 离开了。" % Characters.name_of(cid)}
+
+
+## Assign a fleet post ("" clears it); captain needs a non-flagship ship.
+func set_post(cid: String, post: String, ship_id: int = -1) -> Dictionary:
+	if not s["crew"].has(cid):
+		return _fail("没有这个人。")
+	if post != "" and not Characters.POSTS.has(post):
+		return _fail("没有这个岗位。")
+	if post == "captain":
+		var sh := ship(ship_id)
+		if sh.is_empty() or sh["owner"] != pid() or sh["flagship"]:
+			return _fail("船长只能带非旗舰的船。")
+	var holder := post_holder(post, ship_id) if post != "" else ""
+	if holder != "" and holder != cid:
+		s["crew"][holder]["post"] = ""
+		s["crew"][holder]["ship"] = -1
+	s["crew"][cid]["post"] = post
+	s["crew"][cid]["ship"] = ship_id if post == "captain" else -1
+	return {"ok": true, "msg": "%s 任%s。" % [Characters.name_of(cid), Characters.POSTS[post]["name"]] if post != "" else "%s 卸下了岗位。" % Characters.name_of(cid)}
+
+
+func gift(cid: String) -> Dictionary:
+	if not s["crew"].has(cid):
+		return _fail("没有这个人。")
+	var m: Dictionary = s["crew"][cid]
+	var month := int(s["day"]) / GameData.DAYS_MONTH
+	if int(m["gift_month"]) == month:
+		return _fail("这个月已经送过了。")
+	if house()["gold"] < Characters.GIFT_COST:
+		return _fail("金币不足。")
+	house()["gold"] -= Characters.GIFT_COST
+	house()["month_out"] += Characters.GIFT_COST
+	m["gift_month"] = month
+	add_affinity(cid, Characters.GIFT_AFF)
+	return {"ok": true, "msg": "%s 很高兴，好感 +%d。" % [Characters.name_of(cid), Characters.GIFT_AFF]}
+
+
+func add_affinity(cid: String, n: int) -> void:
+	if not s["crew"].has(cid):
+		return
+	var m: Dictionary = s["crew"][cid]
+	m["aff"] = clampi(int(m["aff"]) + n, 0, 100)
+
+
+func _tick_crew() -> void:
+	if int(s["day"]) % 10 == 0:
+		for cid in s["crew"]:
+			add_affinity(cid, 1)
+	# a personal story chapter opens when the fleet is in port and nothing else is going on
+	if s["event"] != null or s.get("encounter") != null:
+		return
+	var fl := flagship()
+	if fl.is_empty() or not docked(fl):
+		return
+	for cid in s["crew"]:
+		var m: Dictionary = s["crew"][cid]
+		var ch := int(m["chapter"])
+		if ch < 3 and int(m["aff"]) >= Characters.CHAPTER_AFF[ch]:
+			EventBook.open_chapter(self, cid, ch)
+			return
+
+
+func _crew_monthly() -> void:
+	if spec_bonus("rumours") > 0.0:
+		for port in s["hero"]["visited"]:
+			_update_intel(port)
+		if spec_bonus("rumours") >= 1.5:
+			for port in GameData.PORT_IDS:
+				_update_intel(port)
+	# the foreign merchant drifts between taverns from the second year on
+	var day: int = s["day"]
+	if day >= GameData.DAYS_YEAR and not s["crew"].has("helan") and int(s["roam"]["until"]) < day and rng.randf() < 0.35:
+		s["roam"] = {"port": GameData.PORT_IDS[rng.randi() % GameData.PORT_IDS.size()], "until": day + 60}
+		_say("传闻：一位语言不通的异乡商人在 %s 的酒馆落脚。" % GameData.port_name(s["roam"]["port"]), "info")
+
+
 # ---------------------------------------------------------------- encounters & battle
 
 var battle: Battle = null
@@ -1347,7 +1595,8 @@ func encounter_text() -> String:
 
 
 func toll() -> int:
-	return int(maxf(float(GameData.TOLL_MIN), maxf(0.0, float(house()["gold"])) * GameData.TOLL_RATE))
+	var t := maxf(float(GameData.TOLL_MIN), maxf(0.0, float(house()["gold"])) * GameData.TOLL_RATE)
+	return int(t * maxf(0.4, 1.0 - 0.5 * spec_bonus("blackmarket")))
 
 
 func encounter_pay() -> Dictionary:
@@ -1369,7 +1618,7 @@ func flee_chance() -> float:
 	var slowest := 9.0
 	for o in fleet_ships(fl):
 		slowest = minf(slowest, float(GameData.SHIPS[o["type"]]["speed"]) * speed_mult(o))
-	return clampf(0.3 + 0.07 * float(hero_abil("sail") - 1) + (slowest - 1.0) * 0.6, 0.1, 0.9)
+	return clampf(0.3 + 0.07 * float(hero_abil("sail") - 1) + (slowest - 1.0) * 0.6 + 0.02 * float(post_level("nav")) + 0.15 * spec_bonus("fog_nav"), 0.1, 0.95)
 
 
 func encounter_flee() -> Dictionary:
@@ -1406,7 +1655,7 @@ func encounter_fight() -> Dictionary:
 		foes.append(Battle.unit(t, ["黑帆号", "夜枭号", "断桅号", "蚀月号"][i % 4], {}, "main" if i == 0 else "van", i == 0))
 		i += 1
 	battle = Battle.new()
-	battle.setup(mine, foes, {"fight": hero_abil("fight"), "lvl": int(s["hero"]["lvl"])}, int(s["seed"]) + int(s["day"]) * 7, int(s["difficulty"]))
+	battle.setup(mine, foes, battle_hero(), int(s["seed"]) + int(s["day"]) * 7, int(s["difficulty"]))
 	s["battle"] = battle.b
 	return {"ok": true, "msg": "接战！"}
 
@@ -1477,6 +1726,8 @@ func end_battle() -> Dictionary:
 		add_rep(pid(), int(out["rep"]))
 		add_exp(int(out["exp"]))
 		s["stats"]["wins"] = int(s["stats"].get("wins", 0)) + 1
+		for cid in s["crew"]:
+			add_affinity(cid, 8)
 	elif res == "loss":
 		var t := int(maxf(300.0, maxf(0.0, float(h["gold"])) * 0.10))
 		h["gold"] -= t
@@ -1486,6 +1737,8 @@ func end_battle() -> Dictionary:
 			o["cargo"] = {}
 		out["exp"] = 20
 		add_exp(20)
+		for cid in s["crew"]:
+			add_affinity(cid, -5)
 	else:
 		out["exp"] = 15
 		add_exp(15)
@@ -1540,6 +1793,7 @@ func advance_day() -> void:
 	_tick_contracts()
 	_tick_ships()
 	_tick_lighthouses()
+	_tick_crew()
 	if day % GameData.DAYS_MONTH == 0:
 		_monthly()
 	_tick_crisis()
@@ -1693,6 +1947,8 @@ func _monthly() -> void:
 			cost += float(GameData.SHIPS[sh["type"]]["wage"]) + float(GameData.SHIPS[sh["type"]]["price"]) * 0.01
 		var interest: float = h["debt"] * GameData.LOAN_RATE
 		cost += Industry.upkeep(self, hid)
+		if hid == pid():
+			cost += float(crew_wages())
 		h["gold"] -= cost + interest
 		h["month_out"] += cost + interest
 		h["last_net"] = h["month_in"] - h["month_out"]
@@ -1703,6 +1959,7 @@ func _monthly() -> void:
 			AiPlayer.monthly(self, hid)
 		else:
 			_say("月结：上月净收支 %+d 金（固定开支 %d）。" % [int(h["last_net"]), int(cost + interest)], "month")
+			_crew_monthly()
 		if hid == pid() and h["gold"] < 0.0:
 			# automatic emergency loan before a crisis starts
 			var room: float = loan_limit() - h["debt"]
@@ -1816,6 +2073,15 @@ func from_json(text: String) -> bool:
 	for k in ["encounter", "battle", "battle_result"]:
 		if not s.has(k):
 			s[k] = null
+	if not s.has("crew"):
+		s["crew"] = {}
+	if not s.has("roam"):
+		s["roam"] = {"port": "", "until": 0}
+	s["roam"]["until"] = int(s["roam"]["until"])
+	for cid in s["crew"]:
+		var m: Dictionary = s["crew"][cid]
+		for k in ["aff", "chapter", "ship", "joined", "gift_month", "spec_lvl"]:
+			m[k] = int(m.get(k, 0))
 	if s["encounter"] != null:
 		for k in ["cid", "power"]:
 			s["encounter"][k] = int(s["encounter"][k])

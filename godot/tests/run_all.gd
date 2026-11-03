@@ -10,6 +10,7 @@ func _init() -> void:
 	if OS.get_environment("YUNHAI_QUICK") != "":
 		test_battle()
 		test_encounters()
+		test_crew()
 		print("FAILURES: %d" % failures)
 		quit(1 if failures > 0 else 0)
 		return
@@ -23,6 +24,7 @@ func _init() -> void:
 	test_multi_stop_route()
 	test_battle()
 	test_encounters()
+	test_crew()
 	var seeds := [11, 22, 33, 44, 55]
 	var crowns := 0
 	var bot_stage := 0
@@ -440,6 +442,63 @@ func test_encounters() -> void:
 	check(int(out3["bounty"]) == int(c["reward"]) and sim.open_bounties().is_empty() and sim.house()["gold"] > g2, "the bounty pays out and is removed")
 	# the contract board ignores bounties for deliveries
 	check(not sim.can_fulfill(fl, {"kind": "bounty", "port": fl["port"], "good": "", "qty": 0}), "bounties are never delivered as goods")
+
+
+func test_crew() -> void:
+	print("companions")
+	var sim := Sim.new()
+	sim.new_game(31)
+	var fl := sim.flagship()
+	sim.house()["gold"] = 60000.0
+	check(sim.recruitable_at("muxia", "tavern") == ["xiaoman"], "小满 waits in the 暮霞港 tavern")
+	check(not sim.recruit("xiaoman", "qianqi", "tavern")["ok"], "a companion is only hired where they are")
+	check(not sim.recruit_ok("qian", "qianqi", "tavern")["ok"], "钱不让 needs reputation first")
+	var g0: float = sim.house()["gold"]
+	check(sim.recruit("xiaoman", "muxia", "tavern")["ok"] and sim.crew().has("xiaoman") and sim.house()["gold"] < g0, "hiring 小满 costs the signing fee")
+	check(sim.crew_wages() == 120, "wages are summed (%d)" % sim.crew_wages())
+	# posts change travel time and prices
+	sim.house()["rep"] = 700
+	check(sim.recruit("qian", "qianqi", "tavern")["ok"], "钱不让 joins once reputation allows")
+	var buy0 := sim.buy_price("qianqi", "silk")
+	check(sim.set_post("qian", "acct")["ok"] and sim.buy_price("qianqi", "silk") < buy0, "an accountant lowers buy prices (%d -> %d)" % [buy0, sim.buy_price("qianqi", "silk")])
+	var d0 := sim.travel_days("qianqi", "cuijing", "freighter")
+	sim.house()["bp"]["silk"] = true
+	sim.s["story"] = 1
+	check(sim.recruit("luqing", "xiajing", "tavern")["ok"], "陆青 joins after the first story chapter")
+	check(sim.set_post("luqing", "nav")["ok"] and sim.travel_days("qianqi", "cuijing", "freighter") <= d0, "a navigator shortens voyages")
+	check(sim.set_post("qian", "nav")["ok"] and sim.crew()["luqing"]["post"] == "" and sim.crew()["qian"]["post"] == "nav", "a post holds one person; the previous holder steps down")
+	check(not sim.set_post("luqing", "captain", fl["id"])["ok"], "nobody captains the flagship")
+	var r2: Dictionary = sim.buy_ship("freighter", fl["port"])
+	check(sim.set_post("luqing", "captain", int(r2["ship"]))["ok"] and sim.speed_mult(sim.ship(int(r2["ship"]))) > 1.0, "a captain speeds up her ship")
+	# cap, gifts, affinity and story chapters
+	check(sim.crew_cap() == Characters.CREW_CAP[sim.rep_level() - 1], "crew cap follows reputation")
+	var a0: int = sim.crew()["xiaoman"]["aff"]
+	check(sim.gift("xiaoman")["ok"] and sim.crew()["xiaoman"]["aff"] == a0 + Characters.GIFT_AFF and not sim.gift("xiaoman")["ok"], "one gift per month raises affinity")
+	sim.crew()["xiaoman"]["aff"] = 30
+	sim.s["event"] = null
+	sim._tick_crew()
+	check(sim.s["event"] != null and str(sim.s["event"]["id"]).begins_with("char:xiaoman:0"), "a chapter opens at affinity 30 in port")
+	var res := EventBook.resolve(sim, 0)
+	check(res["ok"] and sim.crew()["xiaoman"]["chapter"] == 1 and sim.crew()["xiaoman"]["aff"] > 30, "the chapter is resolved and remembered")
+	sim.crew()["xiaoman"]["chapter"] = 2
+	sim.crew()["xiaoman"]["aff"] = 100
+	sim._tick_crew()
+	EventBook.resolve(sim, 0)
+	check(sim.crew()["xiaoman"]["spec_lvl"] == 2 and sim.spec_bonus("rumours") == 1.5, "finishing the story upgrades the specialty")
+	# battle hero block and the shipwright's blueprint
+	sim.s["ports"]["tonghe"]["friend"][sim.pid()] = 150
+	check(sim.recruit("cen", "tonghe", "yard")["ok"] and sim.has_bp("astro"), "老岑 brings the astrolabe blueprint")
+	sim.s["stats"]["wins"] = 1
+	check(sim.recruit("aman", "chishi", "tavern")["ok"] and sim.battle_hero()["fire_mult"] > 1.1, "阿蛮 joins after a win and boosts gunnery")
+	# wages are paid monthly
+	var g1: float = sim.house()["gold"]
+	sim.s["day"] = GameData.DAYS_MONTH - 1
+	sim.advance_day()
+	check(sim.house()["gold"] < g1 - float(sim.crew_wages()) + 1.0, "monthly wages are deducted")
+	# save / load
+	var sim2 := Sim.new()
+	check(sim2.from_json(sim.to_json()) and sim2.crew().size() == sim.crew().size() and sim2.crew()["luqing"]["post"] == "captain", "companions survive save/load")
+	check(sim.dismiss("qian")["ok"] and not sim.crew().has("qian") and not sim.recruit_ok("qian", "qianqi", "tavern")["ok"], "a dismissed companion does not come back")
 
 
 func test_bot_player(sd: int) -> Dictionary:

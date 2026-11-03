@@ -121,10 +121,24 @@ static func _open(sim: Sim, ev: Dictionary) -> void:
 
 
 static func _find(id: String) -> Dictionary:
+	if id.begins_with("char:"):
+		var parts := id.split(":")
+		var ch: Dictionary = Characters.CHARS[parts[1]]["story"][int(parts[2])]
+		return {"id": id, "title": ch["title"], "text": ch["text"], "art": "", "cid": parts[1], "chapter": int(parts[2]),
+			"choices": ch["choices"].map(func(c): return {"label": c["label"], "effects": c["fx"]})}
 	for e in STORY + RANDOM + [PIRATES]:
 		if e["id"] == id:
 			return e
 	return {}
+
+
+## A companion's personal story chapter (0-2).
+static func open_chapter(sim: Sim, cid: String, chapter: int) -> void:
+	var c: Dictionary = Characters.CHARS[cid]
+	var ch: Dictionary = c["story"][chapter]
+	sim.s["event"] = {"id": "char:%s:%d" % [cid, chapter], "title": "%s · %s（第 %d 章）" % [c["name"], ch["title"], chapter + 1], "text": ch["text"],
+		"art": ["story_rescue", "story_letter", "story_loyalty"][chapter], "cid": cid,
+		"choices": ch["choices"].map(func(x): return {"label": x["label"]})}
 
 
 static func resolve(sim: Sim, choice: int) -> Dictionary:
@@ -179,6 +193,14 @@ static func resolve(sim: Sim, choice: int) -> Dictionary:
 			mk["stock"] = maxf(1.0, mk["stock"] * 0.4)
 	if fx.has("story"):
 		sim.s["story"] = int(fx["story"])
+	if ev.has("cid") and sim.s["crew"].has(ev["cid"]):
+		var m: Dictionary = sim.s["crew"][ev["cid"]]
+		m["chapter"] = maxi(int(m["chapter"]), int(ev["chapter"]) + 1)
+		if fx.has("aff"):
+			sim.add_affinity(ev["cid"], int(fx["aff"]))
+		if fx.has("spec_up"):
+			m["spec_lvl"] = 2
+			msgs.append("%s的专长「%s」更上一层。" % [Characters.name_of(ev["cid"]), Characters.CHARS[ev["cid"]]["spec_name"]])
 	if fx.has("say"):
 		msgs.append(fx["say"])
 	sim.s["event"] = null

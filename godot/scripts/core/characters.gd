@@ -1,0 +1,183 @@
+class_name Characters
+## The twelve recruitable companions (大航海时代4 flavour): who they are, what they are good at,
+## where you find them, and their three-chapter personal stories. Pure data.
+##
+## abil: 航海 sail / 交易 trade / 战斗 fight / 魅力 charm, 1-10.
+## spec: a unique perk id read by Sim.spec_bonus(); after the third chapter it is 1.5× as strong.
+## where: tavern / yard / guild / hall (the building tab) or "any" (every tavern); port "" = anywhere.
+## cond keys: story (main story stage), rep (level), friend (level at the port), wins (battles won),
+##            visited (ports seen), craft_bp (craft blueprints owned), workshops (owned), refits.
+
+const PORTRAITS := {"luqing": 5, "qian": 2, "aman": 7, "shen": 3, "cen": 1, "xiaoman": 4, "moyu": 6, "ning": 2, "feng": 0, "sang": 1, "helan": 7, "ling": 5}
+
+const POSTS := {
+	"nav": {"name": "航海长", "abil": "sail", "desc": "每级航程 −1%、甩开云盗 +2%"},
+	"acct": {"name": "账房", "abil": "trade", "desc": "每级买价 −0.4%、卖价 +0.4%"},
+	"gunner": {"name": "炮术长", "abil": "fight", "desc": "每级炮击伤害 +2.5%"},
+	"boarder": {"name": "接舷队长", "abil": "fight", "desc": "每级接舷战力 +3%"},
+	"captain": {"name": "船长", "abil": "sail", "desc": "带一艘非旗舰的船：每级航速 +1.5%"},
+}
+const CREW_CAP := [3, 4, 5, 6, 8, 12]   # by reputation level
+const GIFT_COST := 300
+const GIFT_AFF := 10
+const CHAPTER_AFF := [30, 60, 100]
+
+const CHARS := {
+	"xiaoman": {"name": "小满", "title": "酒馆跑堂少年", "style": "机灵，爱打听，会跟着你一起长大。",
+		"abil": {"sail": 2, "trade": 3, "fight": 1, "charm": 4}, "spec": "rumours", "spec_name": "传闻",
+		"spec_desc": "每月月初，你到过的港口行情自动更新。", "port": "muxia", "where": "tavern", "cond": {}, "fee": 600, "wage": 120,
+		"story": [
+			{"title": "第一桶金", "text": "小满攒了三年的赏钱想跟你入一股：「少主，我也想当东家。」",
+			 "choices": [{"label": "收下他的 50 金，记在账上", "fx": {"aff": 15, "say": "小满把那张借据贴身收着。"}}, {"label": "笑着拒绝，让他好好跑堂", "fx": {"aff": 5}}]},
+			{"title": "家书", "text": "小满的母亲托人捎信，说家里的渔船漏了。他不肯开口借钱。",
+			 "choices": [{"label": "悄悄替他寄 800 金回去", "fx": {"gold": -800, "aff": 15, "say": "小满后来知道了，一个月没敢直视你。"}}, {"label": "装作不知道", "fx": {"aff": 3}}]},
+			{"title": "长大了", "text": "小满把各港掌柜的脾气记成了一本小册子，交给你：「以后打听消息，不用再花钱了。」",
+			 "choices": [{"label": "让他做商会的情报总管", "fx": {"aff": 15, "spec_up": true, "say": "小满的传闻网从此遍布云海。"}}, {"label": "收下册子，给他涨薪", "fx": {"aff": 10, "spec_up": true}}]},
+		]},
+	"luqing": {"name": "陆青", "title": "霞鲸台采珠女", "style": "冷静寡言，在找失踪的父亲。",
+		"abil": {"sail": 6, "trade": 2, "fight": 3, "charm": 3}, "spec": "fog_nav", "spec_name": "雾中航行",
+		"spec_desc": "航程 −3%，甩开云盗 +15%。", "port": "xiajing", "where": "tavern", "cond": {"story": 1}, "fee": 1500, "wage": 260,
+		"story": [
+			{"title": "父亲的航图", "text": "陆青摊开半张焦黑的航图：「父亲最后一次出航，走的是这条没人走的雾道。」",
+			 "choices": [{"label": "陪她沿雾道走一趟", "fx": {"aff": 15, "say": "雾里什么也没找到，但她第一次对你笑了。"}}, {"label": "先把生意做完再说", "fx": {"aff": 3}}]},
+			{"title": "债主", "text": "风月坞的债主又来要钱，说她父亲还欠着 2,000 金的船款。",
+			 "choices": [{"label": "替她还清", "fx": {"gold": -2000, "aff": 15, "say": "「我会还你的。」她说得很认真。"}}, {"label": "让她自己处理", "fx": {"aff": 2}}]},
+			{"title": "鲸歌", "text": "云鲸迁徙的夜里，陆青在雾中听见了父亲船上的铃声。她说，不找了，父亲已经成了云海的一部分。",
+			 "choices": [{"label": "「以后我的船队就是你的家。」", "fx": {"aff": 20, "spec_up": true, "say": "陆青从此是云海上最好的雾中领航。"}}, {"label": "默默陪她站到天亮", "fx": {"aff": 12, "spec_up": true}}]},
+		]},
+	"qian": {"name": "钱不让", "title": "精打细算的账房先生", "style": "嘴碎，爱财如命，却从不做假账。",
+		"abil": {"sail": 1, "trade": 8, "fight": 1, "charm": 3}, "spec": "haggle", "spec_name": "压价",
+		"spec_desc": "买价再便宜 3%。", "port": "qianqi", "where": "tavern", "cond": {"rep": 2}, "fee": 2400, "wage": 320,
+		"story": [
+			{"title": "一文钱", "text": "钱不让为了一文钱的差额和掌柜吵了半个时辰，整条街都在看热闹。",
+			 "choices": [{"label": "站在他这边，一文也不让", "fx": {"aff": 15, "say": "掌柜认了，钱不让哼着小曲回来。"}}, {"label": "替他补上那一文", "fx": {"aff": 5}}]},
+			{"title": "假账", "text": "对手商会出 5,000 金请他做一本假账陷害你。他把信原封不动放在你桌上。",
+			 "choices": [{"label": "给他同样的 5,000 金做奖赏", "fx": {"gold": -5000, "aff": 20, "say": "「我就知道跟对了人。」"}}, {"label": "口头嘉奖", "fx": {"aff": 8}}]},
+			{"title": "老家的账本", "text": "钱不让说出了心事：他家原是千旗市的大商号，被一本假账搞垮。他想亲手把商号的旧匾挂回去。",
+			 "choices": [{"label": "买下旧铺面送给他（3,000 金）", "fx": {"gold": -3000, "aff": 20, "spec_up": true, "say": "匾挂上的那天，钱不让哭得像个孩子。"}}, {"label": "答应将来帮他", "fx": {"aff": 10, "spec_up": true}}]},
+		]},
+	"aman": {"name": "阿蛮", "title": "云盗出身的炮手", "style": "豪爽粗犷，背叛了旧帮派。",
+		"abil": {"sail": 4, "trade": 1, "fight": 8, "charm": 2}, "spec": "gunnery", "spec_name": "炮击",
+		"spec_desc": "空战炮击伤害 +15%。", "port": "", "where": "any", "cond": {"wins": 1}, "fee": 2000, "wage": 400,
+		"story": [
+			{"title": "旧帮派", "text": "酒馆里有人认出了阿蛮，骂他叛徒。他攥紧了酒碗。",
+			 "choices": [{"label": "替他把那人轰出去", "fx": {"aff": 15, "say": "阿蛮一拳砸在桌上：「够意思！」"}}, {"label": "劝他别惹事", "fx": {"aff": 4}}]},
+			{"title": "黑帆", "text": "阿蛮说旧帮派的头目「黑帆」杀了他的兄弟，他想亲手报仇。",
+			 "choices": [{"label": "答应陪他去", "fx": {"aff": 15, "say": "「等打赢了，我请你喝到天亮。」"}}, {"label": "劝他放下", "fx": {"aff": 3}}]},
+			{"title": "最后一炮", "text": "黑帆的船沉进云海的那一刻，阿蛮没有欢呼。他把一面旧旗扔进了云里。",
+			 "choices": [{"label": "「从今天起，你是我的炮术总管。」", "fx": {"aff": 20, "spec_up": true, "say": "阿蛮的炮从此指哪打哪。"}}, {"label": "拍拍他的肩", "fx": {"aff": 12, "spec_up": true}}]},
+		]},
+	"shen": {"name": "沈白鹭", "title": "落魄世家的剑客", "style": "骄傲，最看重名誉。",
+		"abil": {"sail": 3, "trade": 2, "fight": 7, "charm": 5}, "spec": "boarding", "spec_name": "接舷",
+		"spec_desc": "接舷战力 +20%。", "port": "fengyue", "where": "tavern", "cond": {"rep": 3}, "fee": 3000, "wage": 420,
+		"story": [
+			{"title": "家传剑", "text": "沈白鹭的家传剑被押在风月坞的当铺里，他说不起眼，却总往当铺那边看。",
+			 "choices": [{"label": "赎回来（1,200 金）", "fx": {"gold": -1200, "aff": 15, "say": "他接剑的手在抖。"}}, {"label": "不管", "fx": {"aff": 2}}]},
+			{"title": "挑战", "text": "铁誓舰团的武士在码头当众挑战沈白鹭，说世家的剑早就钝了。",
+			 "choices": [{"label": "让他应战", "fx": {"aff": 15, "say": "三招，对方的刀飞进了云里。"}}, {"label": "拦下他，不值得", "fx": {"aff": 5}}]},
+			{"title": "名誉", "text": "沈白鹭说，他家的名声不是靠剑，是靠守信。他要替祖上还清一笔三十年前的货款。",
+			 "choices": [{"label": "商会替他还（4,000 金）", "fx": {"gold": -4000, "aff": 20, "spec_up": true, "say": "沈家的名字，重新挂回了风月坞的信义榜。"}}, {"label": "陪他亲自去道歉", "fx": {"aff": 12, "spec_up": true}}]},
+		]},
+	"cen": {"name": "老岑", "title": "退役船匠", "style": "脾气古怪，手艺一流。",
+		"abil": {"sail": 5, "trade": 2, "fight": 2, "charm": 1}, "spec": "shipwright", "spec_name": "巧手",
+		"spec_desc": "改造和修理的工费 −25%；入伙时带来星盘的秘传图纸。", "port": "tonghe", "where": "yard", "cond": {"friend": 1}, "fee": 1800, "wage": 300,
+		"story": [
+			{"title": "废船", "text": "老岑盯着船坞角落一艘废船看了一下午：「这船的龙骨比你们现在造的都好。」",
+			 "choices": [{"label": "买下来给他拆着玩（600 金）", "fx": {"gold": -600, "aff": 15, "say": "老岑三天没出船坞。"}}, {"label": "随他看", "fx": {"aff": 4}}]},
+			{"title": "徒弟", "text": "铜鹤矶船坞的年轻船匠想拜老岑为师，老岑嫌他手笨。",
+			 "choices": [{"label": "劝老岑收下", "fx": {"aff": 12, "say": "「笨就多练。」老岑嘴硬，手上却教得仔细。"}}, {"label": "由他去", "fx": {"aff": 4}}]},
+			{"title": "最后一艘船", "text": "老岑说，他这辈子想亲手造一艘不用云炮也能横行云海的快船，就缺一座像样的船坞。",
+			 "choices": [{"label": "出资建一座（5,000 金）", "fx": {"gold": -5000, "aff": 20, "spec_up": true, "say": "老岑把新船坞的第一块木料刻上了你的旗号。"}}, {"label": "答应以后", "fx": {"aff": 10, "spec_up": true}}]},
+		]},
+	"moyu": {"name": "莫语", "title": "不说话的测绘师", "style": "用画和人交流。",
+		"abil": {"sail": 7, "trade": 1, "fight": 2, "charm": 2}, "spec": "survey", "spec_name": "测绘",
+		"spec_desc": "航程 −5%。", "port": "chishi", "where": "tavern", "cond": {"visited": 8}, "fee": 2000, "wage": 280,
+		"story": [
+			{"title": "一幅画", "text": "莫语递给你一幅画：你的旗舰穿过一道从没见过的峡谷。",
+			 "choices": [{"label": "按画里的路试一次", "fx": {"aff": 15, "say": "峡谷真的在那里，省了两天路。"}}, {"label": "收下画", "fx": {"aff": 5}}]},
+			{"title": "云海的尽头", "text": "莫语画了一幅没有边的海图，最东边画着一座陌生的城。她指着那里看你。",
+			 "choices": [{"label": "「总有一天我们去看看。」", "fx": {"aff": 15, "say": "她笑了，在画角添上了你的船。"}}, {"label": "摇头，太远了", "fx": {"aff": 2}}]},
+			{"title": "声音", "text": "暴雨夜，莫语第一次开口，只说了三个字：「谢谢你。」",
+			 "choices": [{"label": "「以后的海图都由你来画。」", "fx": {"aff": 20, "spec_up": true, "say": "莫语的海图成了商会最珍贵的财产。"}}, {"label": "笑着点头", "fx": {"aff": 12, "spec_up": true}}]},
+		]},
+	"ning": {"name": "宁朝雨", "title": "白塔出走的学者", "style": "理想主义。",
+		"abil": {"sail": 2, "trade": 5, "fight": 1, "charm": 6}, "spec": "research", "spec_name": "研究",
+		"spec_desc": "图纸价格 −25%，主角经验 +10%。", "port": "cuijing", "where": "guild", "cond": {"rep": 3, "craft_bp": 1}, "fee": 3500, "wage": 380,
+		"story": [
+			{"title": "禁书", "text": "宁朝雨从白塔带出来的手稿被人盯上了。他问你能不能把它藏在商馆里。",
+			 "choices": [{"label": "藏下", "fx": {"aff": 15, "say": "手稿里记着一些失传的配方。"}}, {"label": "太危险，拒绝", "fx": {"aff": 2}}]},
+			{"title": "学堂", "text": "宁朝雨想在翠鲸岛办一间不收钱的学堂，教孩子们算账和识图。",
+			 "choices": [{"label": "出资（2,500 金）", "fx": {"gold": -2500, "aff": 15, "say": "第一批学生里有三个后来进了你的商会。"}}, {"label": "口头支持", "fx": {"aff": 5}}]},
+			{"title": "白塔的信", "text": "白塔来信请他回去主持研究院。他把信给你看，没有说话。",
+			 "choices": [{"label": "「留下来，这里也能做学问。」", "fx": {"aff": 20, "spec_up": true, "say": "宁朝雨把信烧了，开始写商会的第一本技艺总录。"}}, {"label": "让他自己决定", "fx": {"aff": 12, "spec_up": true}}]},
+		]},
+	"feng": {"name": "风九娘", "title": "走私女商人", "style": "八面玲珑，亦正亦邪。",
+		"abil": {"sail": 4, "trade": 7, "fight": 3, "charm": 8}, "spec": "blackmarket", "spec_name": "黑市",
+		"spec_desc": "在红绡渡卖价 +5%，云盗过路费减半。", "port": "hongxiao", "where": "tavern", "cond": {"friend": 2}, "fee": 4000, "wage": 450,
+		"story": [
+			{"title": "夜市", "text": "风九娘带你逛红绡渡的夜市，顺手把一包东西塞进你怀里：「别问。」",
+			 "choices": [{"label": "收下", "fx": {"aff": 12, "good": ["pearl", 6], "say": "是六颗成色极好的雾珍珠。"}}, {"label": "还给她", "fx": {"aff": 6}}]},
+			{"title": "两面", "text": "有人告诉你，风九娘同时也在给白塔议士带货。她听了只是笑：「我从不骗自己人。」",
+			 "choices": [{"label": "选择相信", "fx": {"aff": 15, "say": "后来她把白塔的航线全告诉了你。"}}, {"label": "警告她", "fx": {"aff": 2}}]},
+			{"title": "身世", "text": "风九娘说她本是云盗的女儿，母亲死后才上岸做生意。「你还要我吗？」",
+			 "choices": [{"label": "「要。」", "fx": {"aff": 20, "spec_up": true, "say": "风九娘从此只替你一家做生意。"}}, {"label": "沉默了很久，点头", "fx": {"aff": 12, "spec_up": true}}]},
+		]},
+	"sang": {"name": "桑铁手", "title": "失去一只手的铸炮匠", "style": "沉默而执拗。",
+		"abil": {"sail": 1, "trade": 3, "fight": 4, "charm": 1}, "spec": "forge", "spec_name": "锻炉",
+		"spec_desc": "你的每座工坊产量 +15%。", "port": "fengyue", "where": "guild", "cond": {"workshops": 2}, "fee": 2800, "wage": 360,
+		"story": [
+			{"title": "铁手", "text": "桑铁手的铁手坏了，他一言不发地用左手干活。",
+			 "choices": [{"label": "请最好的匠人替他修（900 金）", "fx": {"gold": -900, "aff": 15, "say": "新铁手比原来的更灵活。"}}, {"label": "让他歇几天", "fx": {"aff": 5}}]},
+			{"title": "炸膛", "text": "一门新炮试射时炸了膛。桑铁手把自己关在炉房里三天。",
+			 "choices": [{"label": "陪他重铸", "fx": {"aff": 15, "say": "第四天，新炮一发打穿了三层靶板。"}}, {"label": "等他出来", "fx": {"aff": 4}}]},
+			{"title": "最后一门炮", "text": "桑铁手说，他的手是铸「初风暴」时的那门巨炮炸掉的。他想铸一门永远不会炸膛的炮。",
+			 "choices": [{"label": "给他最好的精钢（3,000 金）", "fx": {"gold": -3000, "aff": 20, "spec_up": true, "say": "那门炮至今挂在你旗舰的船头。"}}, {"label": "答应以后", "fx": {"aff": 10, "spec_up": true}}]},
+		]},
+	"helan": {"name": "赫兰", "title": "从别的云域来的异乡商人", "style": "语言不通，手势比划。",
+		"abil": {"sail": 5, "trade": 6, "fight": 3, "charm": 4}, "spec": "foreign", "spec_name": "远客",
+		"spec_desc": "精品（三阶）卖价 +8%。", "port": "", "where": "roam", "cond": {}, "fee": 3000, "wage": 400,
+		"story": [
+			{"title": "手势", "text": "赫兰比划了半天，你终于明白：他的家乡在云海东边很远的地方，一场风暴把他吹到了这里。",
+			 "choices": [{"label": "教他说云海话", "fx": {"aff": 15, "say": "他学会的第一句是「多少钱」。"}}, {"label": "点头", "fx": {"aff": 4}}]},
+			{"title": "故乡的货", "text": "赫兰掏出一块从没见过的金属，上面刻着陌生的文字。他比划着说，那边有很多。",
+			 "choices": [{"label": "小心收好", "fx": {"aff": 15, "say": "你把它锁进了商会的保险柜。"}}, {"label": "还给他", "fx": {"aff": 6}}]},
+			{"title": "东方", "text": "赫兰已经能说简单的云海话了。他说：「总有一天，带你去我的家乡。」",
+			 "choices": [{"label": "「一言为定。」", "fx": {"aff": 20, "spec_up": true, "say": "这个约定，要等第二片云域。"}}, {"label": "笑着举杯", "fx": {"aff": 12, "spec_up": true}}]},
+		]},
+	"ling": {"name": "灵", "title": "云鲸的使者少女", "style": "身世和初风暴有关。",
+		"abil": {"sail": 8, "trade": 1, "fight": 5, "charm": 9}, "spec": "spirit", "spec_name": "鲸语",
+		"spec_desc": "空战指挥点 +1，全军士气 +10。", "port": "xiajing", "where": "tavern", "cond": {"story": 3}, "fee": 0, "wage": 0,
+		"story": [
+			{"title": "鲸语", "text": "灵站在船头对云海说话，一群云鲸从船底掠过。",
+			 "choices": [{"label": "听她讲鲸群的故事", "fx": {"aff": 15, "say": "她说，鲸记得四十年前那场风暴。"}}, {"label": "让船员别吵", "fx": {"aff": 6}}]},
+			{"title": "初风暴", "text": "灵说，初风暴不是天灾，是有人在灯塔上点了不该点的灯。",
+			 "choices": [{"label": "追问是谁", "fx": {"aff": 15, "say": "她摇头：「等你的灯塔亮了，你会知道。」"}}, {"label": "不再追问", "fx": {"aff": 6}}]},
+			{"title": "灯", "text": "灵说她的使命是守着灯塔不再出事。「你的灯，我来守。」",
+			 "choices": [{"label": "「那就一起守。」", "fx": {"aff": 20, "spec_up": true, "say": "从此你的船队出航时，总有云鲸相随。"}}, {"label": "郑重点头", "fx": {"aff": 12, "spec_up": true}}]},
+		]},
+}
+const IDS := ["xiaoman", "luqing", "qian", "aman", "shen", "cen", "moyu", "ning", "feng", "sang", "helan", "ling"]
+
+
+static func name_of(cid: String) -> String:
+	return CHARS[cid]["name"]
+
+
+static func cond_text(cid: String) -> String:
+	var c: Dictionary = CHARS[cid]["cond"]
+	var parts := []
+	if c.has("story"):
+		parts.append("主线第 %d 章之后" % int(c["story"]))
+	if c.has("rep"):
+		parts.append("名声「%s」" % GameData.REP_NAMES[int(c["rep"]) - 1])
+	if c.has("friend"):
+		parts.append("本城友好度「%s」" % GameData.FRIEND_NAMES[int(c["friend"])])
+	if c.has("wins"):
+		parts.append("打赢过云盗")
+	if c.has("visited"):
+		parts.append("到过全部 %d 座港" % int(c["visited"]))
+	if c.has("craft_bp"):
+		parts.append("持有工艺图纸")
+	if c.has("workshops"):
+		parts.append("拥有 %d 座工坊" % int(c["workshops"]))
+	return "、".join(parts) if not parts.is_empty() else "无条件"

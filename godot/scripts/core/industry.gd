@@ -48,6 +48,8 @@ static func output(sim: Sim, pid: String, pl: Dictionary) -> int:
 		n += GameData.SIGNATURE_BONUS
 	if sim.perk(pl["owner"]) == "industry":
 		n += 1
+	if pl["owner"] == sim.pid():
+		n = int(roundf(float(n) * (1.0 + 0.15 * sim.spec_bonus("forge"))))
 	return n
 
 
