@@ -24,6 +24,10 @@ func run(m: Control) -> void:
 	main._close_modal()
 	await _wait(0.3)
 	await _shot("03_port_trade")
+	main._show_help()
+	await _wait(0.3)
+	await _shot("39_help")
+	main._close_modal()
 	main._trade(true, "silk", 9999)
 	await _wait(0.3)
 	main._on_port_clicked("muxia")
@@ -391,6 +395,8 @@ func run(m: Control) -> void:
 	main._crown_celebration()
 	await _wait(0.4)
 	await _shot("15_crown")
+	main._close_modal()
+	await _wait(0.3)
 	get_tree().quit()
 
 
