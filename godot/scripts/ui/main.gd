@@ -48,6 +48,8 @@ var fleet_box: VBoxContainer
 var toast_box: VBoxContainer
 var tut_panel: PanelContainer
 var tut_label: Label
+var hint_panel: PanelContainer
+var hint_label: Label
 var crisis_label: Label
 var modal_layer: Control
 var hover_card: PanelContainer
@@ -317,14 +319,33 @@ func _build_game() -> void:
 	fp.add_child(fleet_box)
 	fp.resized.connect(func(): fp.position.y = size.y - fp.size.y - 12)
 	# tutorial
+	var left_col := VBoxContainer.new()
+	left_col.add_theme_constant_override("separation", 8)
+	left_col.position = Vector2(16, 78)
+	add_child(left_col)
 	tut_panel = PanelContainer.new()
 	tut_panel.add_theme_stylebox_override("panel", UiKit.box(Color(UiKit.INK, 0.92), UiKit.BRASS, 6, 1, 12))
 	tut_panel.custom_minimum_size = Vector2(440, 0)
-	tut_panel.position = Vector2(16, 78)
-	add_child(tut_panel)
+	left_col.add_child(tut_panel)
 	tut_label = UiKit.para("", 16, Color("f6efdc"))
 	tut_label.custom_minimum_size = Vector2(410, 0)
 	tut_panel.add_child(tut_label)
+	# one-time hints the first time something new shows up (round 20)
+	hint_panel = PanelContainer.new()
+	hint_panel.add_theme_stylebox_override("panel", UiKit.box(Color(UiKit.PARCH, 0.97), UiKit.JADE, 6, 2, 12))
+	hint_panel.custom_minimum_size = Vector2(440, 0)
+	hint_panel.visible = false
+	left_col.add_child(hint_panel)
+	var hv := VBoxContainer.new()
+	hv.add_theme_constant_override("separation", 6)
+	hint_panel.add_child(hv)
+	hint_label = UiKit.para("", 15, UiKit.INK)
+	hint_label.custom_minimum_size = Vector2(410, 0)
+	hv.add_child(hint_label)
+	var hrow := HBoxContainer.new()
+	hrow.alignment = BoxContainer.ALIGNMENT_END
+	hrow.add_child(UiKit.button("知道了", func(): hint_panel.visible = false, true))
+	hv.add_child(hrow)
 	crisis_label = UiKit.label("", 18, Color.WHITE, true)
 	var cp := PanelContainer.new()
 	cp.add_theme_stylebox_override("panel", UiKit.box(UiKit.TERRA, Color.TRANSPARENT, 6, 0, 10))
@@ -922,6 +943,7 @@ func _show_festival() -> void:
 	if f == null:
 		return
 	sim.s["festival_show"] = null
+	_hint("festival")
 	var lines := []
 	if f["awards"].is_empty():
 		lines.append("今年没有颁出奖项。")
@@ -1337,6 +1359,8 @@ func _tab_post(here: bool) -> void:
 		if lvl + 1 < GameData.HQ.size():
 			var nxt: Dictionary = GameData.HQ[lvl + 1]
 			var ok := sim.hq_ok()
+			if ok["ok"]:
+				_hint("hq")
 			var hb := UiKit.button("扩建为「%s」· %s 金" % [nxt["name"], UiKit.money(nxt["cost"])], func(): _act(sim.upgrade_hq()); _refresh_side())
 			hb.disabled = not ok["ok"]
 			hb.tooltip_text = ("%s（名声「%s」）" % [nxt["desc"], GameData.REP_NAMES[int(GameData.HQ_REP[lvl + 1]) - 1]]) if ok["ok"] else ("%s — %s" % [nxt["desc"], ok["msg"]])
@@ -1527,6 +1551,8 @@ func _tab_hall() -> void:
 	var spent: Dictionary = sim.works(_port)["spent"]
 	var mine := float(spent.get(hid, 0.0))
 	var hd := HBoxContainer.new()
+	if sim.work_ok(_port, "dock")["ok"] or sim.work_level(_port, "dock") > 0 or ben != "":
+		_hint("works")
 	var hl := UiKit.label("城建 · 恩主：%s" % (GameData.HOUSES[ben]["name"] if ben != "" else "暂无"), 16, UiKit.BRASS if ben == hid else UiKit.INK, true)
 	hl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	hd.add_child(hl)
@@ -1675,6 +1701,8 @@ func _tab_guild() -> void:
 func _tab_tavern() -> void:
 	side_body.add_child(UiKit.label("委托板", 18, UiKit.INK, true))
 	var cs := sim.open_contracts().filter(func(c): return c.get("kind", "trade") == "trade")
+	if not cs.is_empty():
+		_hint("contract")
 	if cs.is_empty():
 		side_body.add_child(UiKit.para("眼下没有委托。各港每隔一阵会张贴求购单，先把货送到的商会拿走全部酬金。", 14, UiKit.MUTED))
 	for c in cs:
@@ -1976,6 +2004,10 @@ func _close_modal() -> void:
 
 func _show_event() -> void:
 	var ev: Dictionary = sim.s["event"]
+	var eid := str(ev["id"])
+	for pre in ["rival", "quest", "pair", "trio"]:
+		if eid.begins_with(pre + ":"):
+			_hint("pair" if pre == "trio" else pre)
 	var btns := []
 	for i in ev["choices"].size():
 		btns.append([ev["choices"][i]["label"], _choose_event.bind(i), i > 0])
@@ -1996,6 +2028,7 @@ func _recruit_rows(where: String) -> void:
 	var rc := sim.recruitable_at(_port, where)
 	if rc.is_empty():
 		return
+	_hint("recruit")
 	side_body.add_child(HSeparator.new())
 	side_body.add_child(UiKit.label("在这里能遇到的人", 16, UiKit.INK, true))
 	for cid in rc:
@@ -2152,6 +2185,7 @@ func _show_encounter() -> void:
 	var e = sim.s["encounter"]
 	if e == null:
 		return
+	_hint("encounter")
 	var bounty: bool = e["kind"] == "bounty"
 	var fl := sim.flagship()
 	var lines := [sim.encounter_text()]
@@ -2332,6 +2366,7 @@ func _ship_card(sh: Dictionary) -> Control:
 			continue
 		var plan := sim.refit_plan(sh, k)
 		var need := sim.refit_cost(sh, k)
+		_hint("refit")
 		var mats := []
 		for g in need["mats"]:
 			mats.append("%s×%d" % [GameData.good_name(g), int(need["mats"][g])])
@@ -2463,6 +2498,7 @@ func _show_rival(hid: String) -> void:
 	if hid == sim.pid():
 		_show_ledger()
 		return
+	_hint("intel")
 	var d: Dictionary = GameData.HOUSES[hid]
 	var h := sim.house(hid)
 	var lines := []
@@ -2549,6 +2585,34 @@ func _save() -> void:
 
 
 # =================================================================== tutorial
+
+## Shows a short explanation the first time something new appears; remembered in the save.
+const HINTS := {
+	"contract": "委托板：求购单先到先得，期限内把货送到就一次拿走全部酬金，比普通跑商划算得多。接下前先看看船上装不装得下。",
+	"recruit": "有人愿意加入商会：伙伴安家费只付一次、月薪每月扣，派到岗位上就有加成，还各有一样专长。好感高了会有剧情、托付，办成托付的伙伴甚至不再领薪水。",
+	"rival": "对手的当家来打招呼：赛船看航速和航海本事，论道看魅力和名声，都有输有赢；买他们的图纸最稳妥；买通港务拖住他们的船可能败露，会伤名声。",
+	"encounter": "遇上云盗：交过路费最省事，甩开看航海本事和船速，开战是回合制空战——炮手和船只的火力、耐久决定胜负，打赢有好感与悬赏。",
+	"festival": "灯节：每年开春颁三项奖——赛船冠军、年度商王、建设之光，各有奖金与名声。灯节 12 天里甜霞果、丝云绸、霞果酒卖价 +15%，对手的当家也可能来下战书。",
+	"quest": "伙伴的托付：接下后记在伙伴面板里，送货类在目的港的酒馆或伙伴面板交付，同行类到港即成，误期会伤好感。",
+	"pair": "伙伴之间的故事：两位（或三位）好感够高的伙伴在港口会有他们自己的场景，选项会影响各人的好感，偶尔还有小收获。",
+	"works": "城建：在城主府出资修码头（补给更省、修船更快）、集市（行情恢复更快）、学堂（本城工坊增产）。出资最多的商会是本城恩主，买货更便宜、每月得名声。",
+	"hq": "商会总部：回到母港的商馆页可以扩建会馆，伙伴上限更高、每月添名声、薪水有折扣，最高一级还能多带一艘船。",
+	"intel": "对手情报：点顶栏的商会名随时查看对手的船、工坊、恩主城和灯塔进度。他们在同一港时，当家会来打招呼。",
+	"refit": "船坞改装：给船换炮、加货舱、升引擎都要花钱和时间，船员越多改得越快。旗舰和编队里的船一起改最省事。",
+}
+
+
+func _hint(key: String) -> void:
+	if hint_panel == null or sim == null or not HINTS.has(key):
+		return
+	if not sim.s.has("hints"):
+		sim.s["hints"] = {}
+	if sim.s["hints"].has(key):
+		return
+	sim.s["hints"][key] = true
+	hint_label.text = HINTS[key]
+	hint_panel.visible = true
+
 
 func _tutorial_goal() -> Dictionary:
 	var home: String = GameData.HOUSES[sim.pid()]["home"]

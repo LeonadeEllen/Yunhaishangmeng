@@ -187,7 +187,7 @@ func new_game(seed_value: int = 0, player: String = "lamp", difficulty: int = 1)
 		"event": null, "story": 0, "stats": {"trades": 0, "profit": 0, "best_trade": 0, "handled": {}, "contracts": 0},
 		"crown": null,
 		"hero": {"lvl": 1, "exp": 0, "pts": 0, "abil": {"sail": 1, "trade": 1, "fight": 1, "charm": 1}, "days_sailed": 0, "visited": {}},
-		"tutorial": 0, "player": player, "fashion": null, "difficulty": difficulty,
+		"tutorial": 0, "hints": {}, "player": player, "fashion": null, "difficulty": difficulty,
 		"contracts": [], "next_contract_id": 1,
 		"encounter": null, "battle": null, "battle_result": null,
 		"crew": {}, "roam": {"port": "", "until": 0},
@@ -2661,6 +2661,8 @@ func from_json(text: String) -> bool:
 	# JSON turns ints into floats; normalise the ones we use as ints/ids
 	for k in ["day", "next_ship_id", "story", "tutorial"]:
 		s[k] = int(s[k])
+	if not s.has("hints"):
+		s["hints"] = {}
 	if s["crown"] != null:
 		s["crown"]["day"] = int(s["crown"]["day"])
 	if not s.has("hero"):

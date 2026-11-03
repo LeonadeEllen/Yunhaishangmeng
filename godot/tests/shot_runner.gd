@@ -80,6 +80,12 @@ func run(m: Control) -> void:
 	main._open_port("qianqi", 5)
 	await _wait(0.3)
 	await _shot("13_tavern")
+	# round 20: a one-time hint
+	main.sim.s["hints"].erase("contract")
+	main._hint("contract")
+	await _wait(0.3)
+	await _shot("34_hint_contract")
+	main.hint_panel.visible = false
 	main._show_ledger()
 	await _wait(0.3)
 	await _shot("14_ledger")
