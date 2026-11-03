@@ -170,7 +170,7 @@ static func _open(sim: Sim, ev: Dictionary) -> void:
 static func _find(id: String) -> Dictionary:
 	if id.begins_with("quest:"):
 		var qc := id.split(":")[1]
-		var q: Dictionary = Characters.QUESTS[qc]
+		var q: Dictionary = Characters.quest_def(qc)
 		return {"id": id, "title": q["title"], "text": q["text"], "art": "", "quest": qc,
 			"choices": [{"label": "答应下来", "effects": {"quest_accept": qc}}, {"label": "现在腾不出手", "effects": {"quest_decline": qc}}]}
 	if id.begins_with("trio:"):
@@ -211,10 +211,12 @@ static func open_pair(sim: Sim, idx: int) -> void:
 
 
 ## A companion asks a personal errand of you (round 17).
-static func open_quest(sim: Sim, cid: String) -> void:
-	var q: Dictionary = Characters.QUESTS[cid]
-	sim.s["event"] = {"id": "quest:%s" % cid, "title": "%s的托付 · %s" % [Characters.name_of(cid), q["title"]],
-		"text": q["text"] + "（送 %d 件%s到 %s，%d 天内，谢礼 %s 金）" % [int(q["qty"]), GameData.good_name(q["good"]), GameData.port_name(q["port"]), int(q["days"]), UiKit.money(q["gold"])],
+static func open_quest(sim: Sim, key: String) -> void:
+	var q: Dictionary = Characters.quest_def(key)
+	var cid := Characters.quest_cid(key)
+	var second := key.ends_with("#2")
+	sim.s["event"] = {"id": "quest:%s" % key, "title": "%s的%s托付 · %s" % [Characters.name_of(cid), "第二件" if second else "", q["title"]],
+		"text": q["text"] + "（%s，谢礼 %s 金%s）" % [Characters.quest_ask(key), UiKit.money(q["gold"]), "；办成后%s不再领薪水" % Characters.name_of(cid) if second else ""],
 		"art": "story_letter", "choices": [{"label": "答应下来"}, {"label": "现在腾不出手"}]}
 
 
@@ -379,13 +381,13 @@ static func resolve(sim: Sim, choice: int) -> Dictionary:
 		sim.s["trios_done"][str(int(ev["trio"]))] = true
 	if fx.has("quest_accept"):
 		var qa: String = fx["quest_accept"]
-		sim.quests()[qa] = {"state": "active", "end": int(sim.s["day"]) + int(Characters.QUESTS[qa]["days"])}
-		msgs.append("%s记下了这件事。" % Characters.name_of(qa))
+		sim.quests()[qa] = {"state": "active", "end": int(sim.s["day"]) + int(Characters.quest_def(qa)["days"]), "wins": int(sim.s["stats"].get("wins", 0))}
+		msgs.append("%s记下了这件事。" % Characters.name_of(Characters.quest_cid(qa)))
 	if fx.has("quest_decline"):
 		var qd: String = fx["quest_decline"]
 		sim.quests()[qd] = {"state": "declined", "end": 0}
-		sim.add_affinity(qd, -3)
-		msgs.append("%s点点头，没有再提。" % Characters.name_of(qd))
+		sim.add_affinity(Characters.quest_cid(qd), -3)
+		msgs.append("%s点点头，没有再提。" % Characters.name_of(Characters.quest_cid(qd)))
 	if ev.has("pair"):
 		var pr: Dictionary = Characters.PAIRS[int(ev["pair"])]
 		sim.add_affinity(pr["a"], int(fx.get("aff_a", 0)))

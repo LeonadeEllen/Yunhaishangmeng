@@ -257,6 +257,76 @@ const QUESTS := {
 		"done": "第一坛新酒开封，酒坊门口排了半条街。", "fail": "芦生说霞果烂在路上也常有，明年再酿。"},
 }
 
+## A second, larger errand once the first is done and affinity is high (round 19).
+## kind: deliver (goods to a port), visit (sail the flagship to a port), fight (win a battle).
+## Doing it earns the companion's keepsake: they stop taking wages.
+const QUEST2_AFF := 80
+const QUESTS2 := {
+	"xiaoman": {"title": "回家看看", "kind": "visit", "port": "muxia", "days": 120, "gold": 1000, "rep": 20,
+		"text": "小满说新龙骨装好了，母亲来信让他回去看一眼。「少主要是顺路……能一起去吗？我想让她看看我跟的是什么人。」",
+		"done": "母亲做了一桌鱼。小满送你上船时说，以后不要薪水了，商会就是家。", "fail": "小满说母亲一定理解。他把信叠得很小。", "keepsake": "一块鱼形木牌"},
+	"luqing": {"title": "父亲的仇", "kind": "fight", "days": 180, "gold": 2000, "rep": 60,
+		"text": "陆青终于说了父亲的死：云盗。「我不求你去找那伙人。只求下次遇上云盗，别躲，打赢一次。我想在船上看着。」",
+		"done": "炮声停了之后，陆青在船头站了很久。她说从此不要薪水，这条命是商会的。", "fail": "陆青说仇可以等，她等了十年。", "keepsake": "父亲的旧罗盘"},
+	"qian": {"title": "金铎城的大账", "kind": "deliver", "good": "brocade", "qty": 30, "port": "jinduo", "days": 120, "gold": 8000, "rep": 60,
+		"text": "钱不让翻出一本旧账：当年商号最大的一笔生意，三十匹云锦送金铎城，船沉了。「我想把这笔账做完。」",
+		"done": "钱不让在账本最后一页写下「清」字，合上。他说从此薪水不必再算。", "fail": "钱不让把旧账放回箱底。", "keepsake": "一本写着「清」字的账簿"},
+	"aman": {"title": "最后一刀", "kind": "fight", "days": 180, "gold": 3000, "rep": 60,
+		"text": "阿蛮说当年的云盗头子还在海上。「我不想去找他。但下次云盗来，让我打头阵，打赢了，我就算跟过去两清了。」",
+		"done": "打赢的那天阿蛮把旧刀扔进了云海。他说以后不领薪水，跟你混饭吃。", "fail": "阿蛮把刀擦了一遍，又收了回去。", "keepsake": "一截刀柄"},
+	"shen": {"title": "沈家的帆", "kind": "deliver", "good": "rigging", "qty": 20, "port": "fengyue", "days": 120, "gold": 6000, "rep": 80,
+		"text": "沈白鹭想用二十套索具重修沈家留在风月坞的那艘老船。「它不能再飞了，但它该体面。」",
+		"done": "老船修好了，停在风月坞最显眼的泊位。沈白鹭说，沈家欠你的，用一辈子的薪水抵。", "fail": "沈白鹭把船图卷起来，说再等一年。", "keepsake": "沈家老船的一块船名牌"},
+	"cen": {"title": "最后一艘船", "kind": "deliver", "good": "steel", "qty": 60, "port": "tonghe", "days": 120, "gold": 5000, "rep": 40,
+		"text": "老岑说这辈子想亲手造最后一艘船，缺六十件精钢做龙骨。「造完我就只给商会修船，不收工钱。」",
+		"done": "船下水那天老岑哭了。他真的不再领薪水。", "fail": "老岑说没关系，图纸还在。", "keepsake": "一把用旧的刨子"},
+	"moyu": {"title": "翠鲸岛的画", "kind": "visit", "port": "cuijing", "days": 120, "gold": 2500, "rep": 40,
+		"text": "莫语画了一张翠鲸岛，画里有一个空位。「我想去那里，把船画进去。」",
+		"done": "画完成了，挂在旗舰舱里。莫语在画角写：此后不取薪。", "fail": "莫语把画收了起来，空位还在。", "keepsake": "一幅翠鲸岛的画"},
+	"ning": {"title": "学堂的夜课", "kind": "deliver", "good": "lamp", "qty": 20, "port": "cuijing", "days": 120, "gold": 6000, "rep": 80,
+		"text": "宁朝雨想在学堂开夜课，孩子们白天要下田。二十盏灯油。「这一次我还是不说这是生意。」",
+		"done": "夜课开了，灯一直亮到后半夜。宁朝雨说，她的薪水留给学堂，商会不用再付。", "fail": "宁朝雨说白天的课也够讲一辈子。", "keepsake": "孩子们写的一封信"},
+	"feng": {"title": "大买家", "kind": "deliver", "good": "pearl", "qty": 60, "port": "hongxiao", "days": 90, "gold": 10000, "rep": 20,
+		"text": "风九娘说夜市的买家要六十颗雾珍珠，一口价一万金。「这一单做完，我就不用再做这种生意了。」",
+		"done": "珍珠交了，钱到了。风九娘说她以后不要薪水，省得你老问她钱哪来的。", "fail": "风九娘说买家换了人，这单黄了。", "keepsake": "一颗没卖掉的珍珠"},
+	"sang": {"title": "十门炮", "kind": "deliver", "good": "cannon", "qty": 10, "port": "fengyue", "days": 150, "gold": 8000, "rep": 60,
+		"text": "桑铁手要十门炮送回风月坞的炉房，说要拆了重铸。「铸成那一门，商会就不欠我薪水，我欠商会一门炮。」",
+		"done": "炉房里抬出一门炮，比十门加起来都亮。桑铁手说从此不领薪。", "fail": "桑铁手说炉子冷了。", "keepsake": "一枚炮弹模子"},
+	"helan": {"title": "回一趟焦岩堡", "kind": "visit", "port": "jiaoyan", "days": 150, "gold": 3000, "rep": 40,
+		"text": "赫兰比划了很久，你才明白：她想回焦岩堡一趟，把家乡的东西带来给商会。",
+		"done": "赫兰带回一箱东西，没人认得。她比划说，以后不要薪水，这些就是薪水。", "fail": "赫兰望着东边，没再比划。", "keepsake": "一串看不懂的骨饰"},
+	"ling": {"title": "再看一眼鲸群", "kind": "visit", "port": "xiajing", "days": 120, "gold": 2000, "rep": 60,
+		"text": "灵说鲸群今年会从霞鲸台外海过。「带我去看。它们会记得这条船。」",
+		"done": "鲸群绕着船游了一圈。灵说鲸群认下了这条船，她也不要薪水了。", "fail": "灵说鲸群走了，明年再来。", "keepsake": "一片鲸鳞"},
+	"duoyin": {"title": "钟楼的铜", "kind": "deliver", "good": "brass", "qty": 60, "port": "jinduo", "days": 120, "gold": 6000, "rep": 60,
+		"text": "铎音要六十件铜件给金铎城的钟楼换一口新钟。「钟响的时候，整座城都会念你的名字。」",
+		"done": "新钟第一次响，金铎城满街的人抬头。铎音说她的薪水，就是这钟声。", "fail": "铎音说旧钟还能响几年。", "keepsake": "一枚小铜铃"},
+	"lusheng": {"title": "新酒上市", "kind": "deliver", "good": "wine", "qty": 40, "port": "qianqi", "days": 90, "gold": 4000, "rep": 40,
+		"text": "芦生的新酒酿成了，想把四十坛送到千旗市打出名号。「这回酒牌上写商会的名字。」",
+		"done": "酒牌挂出去，千旗市的酒客记住了商会的名字。芦生说从此不要薪水，管酒就行。", "fail": "芦生说酒放一年更香。", "keepsake": "第一坛新酒的酒牌"},
+}
+
+
+static func quest_cid(key: String) -> String:
+	return key.split("#")[0]
+
+
+static func quest_def(key: String) -> Dictionary:
+	var cid := quest_cid(key)
+	return QUESTS2[cid] if key.ends_with("#2") else QUESTS[cid]
+
+
+## One line that says what an errand asks for.
+static func quest_ask(key: String) -> String:
+	var q := quest_def(key)
+	match str(q.get("kind", "deliver")):
+		"visit":
+			return "旗舰到 %s 一趟，%d 天内" % [GameData.port_name(q["port"]), int(q["days"])]
+		"fight":
+			return "%d 天内打赢一场空战" % int(q["days"])
+	return "送 %d 件%s到 %s，%d 天内" % [int(q["qty"]), GameData.good_name(q["good"]), GameData.port_name(q["port"]), int(q["days"])]
+
+
 ## Three companions who sail together, once each likes you enough (round 17).
 const TRIO_AFF := 50
 const TRIOS := [

@@ -929,6 +929,23 @@ func test_quests() -> void:
 	var a0: int = sim.crew()["aman"]["aff"]
 	var d := sim.quest_deliver("aman")
 	check(d["ok"] and sim.quest_state("aman") == "done" and sim.house()["gold"] == g0 + float(q["gold"]) and sim.house()["rep"] > r0 and sim.crew()["aman"]["aff"] == a0 + Characters.QUEST_DONE_AFF and int(sim.fleet_cargo(fl).get(q["good"], {}).get("qty", 0)) == 0, "delivering pays %d gold, reputation and affinity and takes the goods" % int(q["gold"]))
+	# the second, larger errand: 阿蛮 asks for a battle won (round 19)
+	var wage0 := sim.crew_wages()
+	sim.crew()["aman"]["aff"] = Characters.QUEST2_AFF
+	sim.s["event"] = null
+	sim._tick_crew()
+	check(sim.s["event"] != null and str(sim.s["event"]["id"]) == "quest:aman#2" and str(sim.s["event"]["text"]).contains("不再领薪水"), "after the first errand and affinity %d a second one is asked" % Characters.QUEST2_AFF)
+	check(EventBook.resolve(sim, 0)["ok"] and sim.quest_state("aman#2") == "active" and not sim.quest_ok("aman#2")["ok"], "a fight errand cannot be handed in, only won")
+	sim._tick_quests()
+	check(sim.quest_state("aman#2") == "active", "no battle yet, still waiting")
+	sim.s["stats"]["wins"] = int(sim.s["stats"].get("wins", 0)) + 1
+	var g2: float = sim.house()["gold"]
+	sim._tick_quests()
+	check(sim.quest_state("aman#2") == "done" and sim.house()["gold"] == g2 + float(Characters.QUESTS2["aman"]["gold"]) and sim.crew()["aman"].get("free", false) and sim.crew_wages() == wage0 - int(Characters.CHARS["aman"]["wage"]), "winning a battle completes it; 阿蛮 keeps a keepsake and stops taking wages (%d -> %d)" % [wage0, sim.crew_wages()])
+	sim.crew()["aman"]["chapter"] = 3   # affinity 100 would open his last chapter; not what we test here
+	sim.s["event"] = null
+	sim._tick_crew()
+	check(sim.s["event"] == null, "no third errand")
 	# declining and failing
 	check(sim.recruit("shen", "fengyue", "tavern")["ok"], "沈白鹭 joins")
 	sim.crew()["shen"]["aff"] = Characters.QUEST_AFF
@@ -962,7 +979,23 @@ func test_quests() -> void:
 	sim.advance_day()
 	var f = sim.s["festival_show"]
 	check(f != null and f.has("act") and sim.crew().has(f["act"]["cid"]), "a companion has a moment at the lantern festival (%s)" % str(f["act"]["cid"] if f != null and f.has("act") else ""))
+	# a visit errand is done by docking there (round 19)
+	sim.s["crew"]["moyu"] = sim.s["crew"]["aman"].duplicate(true)
+	sim.s["crew"]["moyu"]["post"] = ""
+	sim.s["crew"]["moyu"].erase("free")
+	sim.crew()["moyu"]["aff"] = Characters.QUEST2_AFF
+	sim.crew()["moyu"]["chapter"] = 2
+	sim.quests()["moyu"] = {"state": "done", "end": 0}
+	sim.s["event"] = null
+	sim.s["festival_show"] = null
+	sim._tick_crew()
+	check(sim.s["event"] != null and str(sim.s["event"]["id"]) == "quest:moyu#2", "莫语 asks to be taken to 翠鲸岛")
+	EventBook.resolve(sim, 0)
+	check(not sim.quest_ok("moyu#2")["ok"] and sim.quests_at("cuijing") == ["moyu#2"], "the visit shows up at that port's tavern and nowhere else")
+	fl["port"] = "cuijing"
+	fl["to"] = ""
+	check(sim.quest_deliver("moyu#2")["ok"] and sim.quest_state("moyu#2") == "done" and sim.crew()["moyu"].get("free", false), "docking there completes the visit")
 	# save and load keep it all
 	var sim2 := Sim.new()
 	sim2.from_json(sim.to_json())
-	check(sim2.quest_state("aman") == "done" and sim2.s["trios_done"].has("0"), "errands and trio scenes survive a save")
+	check(sim2.quest_state("aman") == "done" and sim2.quest_state("aman#2") == "done" and sim2.crew()["aman"].get("free", false) and sim2.s["trios_done"].has("0"), "errands, keepsakes and trio scenes survive a save")

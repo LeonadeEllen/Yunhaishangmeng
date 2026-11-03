@@ -337,6 +337,24 @@ func run(m: Control) -> void:
 	await _wait(0.4)
 	await _shot("30_crew_quest")
 	main._close_modal()
+	# round 19: the second errand and a keepsake
+	main.sim.quest_deliver("aman")
+	main.sim.crew()["aman"]["aff"] = Characters.QUEST2_AFF
+	main.sim.crew()["qian"]["aff"] = Characters.QUEST2_AFF
+	main.sim.quests()["qian"] = {"state": "done", "end": 0}
+	main.sim.s["crew"]["qian"]["free"] = true
+	main.sim.s["crew"]["qian"]["keepsake"] = Characters.QUESTS2["qian"]["keepsake"]
+	main.sim.quests()["qian#2"] = {"state": "done", "end": 0}
+	EventBook.open_quest(main.sim, "aman#2")
+	main._show_event()
+	await _wait(0.4)
+	await _shot("32_second_errand")
+	main._choose_event(0)
+	main._close_modal()
+	main._show_crew()
+	await _wait(0.4)
+	await _shot("33_crew_keepsake")
+	main._close_modal()
 	main.sim.s["crown"] = {"hid": main.sim.pid(), "day": main.sim.s["day"]}
 	main._crown_celebration()
 	await _wait(0.4)
