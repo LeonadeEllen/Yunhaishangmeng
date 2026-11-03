@@ -202,18 +202,25 @@ static func monthly(sim: Sim, hid: String) -> void:
 			Industry.ai_build(sim, hid, spare)
 		if spare > (40000.0 if style == "industry" else 60000.0):
 			Industry.ai_upgrade(sim, hid, spare * 0.5)
-		# contest the player's strongest foothold now and then
+		# contest someone else's strongest foothold now and then (the player's, or a rival's)
 		elif lh["stage"] >= 1 and sim.rng.randf() < 0.15:
-			var me := sim.pid()
-			for port in sim.open_ports():
-				if sim.patron(port) != me or Industry.count_buildings(sim, port, me) < 2:
+			var done := false
+			for other in GameData.HOUSE_IDS:
+				if other == hid or sim.house(other)["bankrupt"] or done:
 					continue
-				var plots: Array = sim.s["ports"][port]["plots"]
-				for i in plots.size():
-					if plots[i] != null and plots[i]["owner"] == me and h["gold"] > next_cost + Industry.buyout_cost(sim, port, i) + WORKING_CAPITAL * 1.5:
-						Industry.buyout(sim, port, i, hid)
+				for port in sim.open_ports():
+					if sim.patron(port) != other or Industry.count_buildings(sim, port, other) < 2:
+						continue
+					var plots: Array = sim.s["ports"][port]["plots"]
+					for i in plots.size():
+						if plots[i] != null and plots[i]["owner"] == other and h["gold"] > next_cost + Industry.buyout_cost(sim, port, i) + WORKING_CAPITAL * 1.5:
+							var r := Industry.buyout(sim, port, i, hid)
+							if r["ok"]:
+								sim._say("%s 收购了%s在 %s 的%s工坊。" % [GameData.HOUSES[hid]["name"], GameData.HOUSES[other]["name"], GameData.port_name(port), GameData.good_name(plots[i]["b"])], "rival")
+								done = true
+							break
+					if done:
 						break
-				break
 	# Keep enough for the next lighthouse stage before expanding.
 	if ships.size() < sim.max_ships(hid) and h["gold"] > sim.ship_price("galleon", hid) + WORKING_CAPITAL * (1.0 if style == "ships" else 2.0):
 		var home: String = GameData.HOUSES[hid]["home"]

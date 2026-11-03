@@ -116,6 +116,8 @@ func travel_days(from: String, to: String, type: String, hid: String = "", sh: D
 	if hid == pid():
 		d *= 1.0 - 0.03 * float(hero_abil("sail") - 1)
 		d *= (1.0 - 0.01 * float(post_level("nav"))) * (1.0 - 0.03 * spec_bonus("fog_nav")) * (1.0 - 0.05 * spec_bonus("survey"))
+		if GameData.region_of(from) == 2 or GameData.region_of(to) == 2:
+			d *= 1.0 - 0.1 * spec_bonus("eastern")
 	d *= GameData.wind_factor(from, to, int(s.get("day", 0)))
 	return maxi(1, int(roundf(d)))
 
@@ -514,6 +516,8 @@ func sell_price(port: String, good: String, hid: String = "") -> int:
 			m *= 1.0 + 0.05 * spec_bonus("blackmarket")
 		if GameData.tier(good) == 3:
 			m *= 1.0 + 0.08 * spec_bonus("foreign")
+		if GameData.region_of(port) == 1 and GameData.tier(good) == 2 and GameData.GOODS[good]["home"] == "":
+			m *= 1.0 + 0.06 * spec_bonus("brewer")   # the eastern processed goods, sold in the west
 	return int(roundf(unit_price(port, good) * m))
 
 
@@ -745,6 +749,8 @@ func depart(ship_id: int, dest: String) -> Dictionary:
 	if sh["owner"] == pid() and sh["flagship"]:
 		# pirates are thicker in the east (and around the strait)
 		s["sailed"] = GameData.EAST_ENCOUNTER if (GameData.region_of(sh["from"]) == 2 or GameData.region_of(dest) == 2) else 1.0
+		if float(s["sailed"]) > 1.0 and spec_bonus("eastern") > 0.0:
+			s["sailed"] = 1.0
 	elif sh["owner"] != pid():
 		_rival_raid(sh, dest)
 	var n := fleet_ships(sh).size()

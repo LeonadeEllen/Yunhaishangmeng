@@ -247,6 +247,10 @@ func run(m: Control) -> void:
 	await _shot("19_east_event")
 	main._choose_event(1)
 	main._close_modal()
+	main._show_rival("tower")
+	await _wait(0.4)
+	await _shot("20_rival_intel")
+	main._close_modal()
 	main.sim.s["crown"] = {"hid": main.sim.pid(), "day": main.sim.s["day"]}
 	main._crown_celebration()
 	await _wait(0.4)

@@ -562,7 +562,11 @@ func _refresh_top() -> void:
 			l.name = "L"
 			hb.add_child(l)
 			hb.name = hid
-			hb.tooltip_text = "%s 的灯塔进度" % GameData.HOUSES[hid]["name"]
+			hb.tooltip_text = "%s · 点开看它在做什么" % GameData.HOUSES[hid]["name"]
+			hb.mouse_filter = Control.MOUSE_FILTER_STOP
+			hb.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+			var hh: String = hid
+			hb.gui_input.connect(func(ev): if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT: _show_rival(hh))
 			rival_box.add_child(hb)
 	for hid in GameData.HOUSE_IDS:
 		var lh: Dictionary = sim.house(hid)["lh"]
@@ -2272,6 +2276,62 @@ func _show_ledger() -> void:
 		if hid != sim.pid():
 			lines.append("%s：%d 艘船 · 灯塔 %d/3 · 名声 %s · 工坊 %d 座%s" % [GameData.HOUSES[hid]["name"], sim.ships_of(hid).size(), sim.house(hid)["lh"]["stage"], GameData.REP_NAMES[sim.rep_level(hid) - 1], Industry.all_buildings(sim, hid).size(), " · 已破产" if sim.house(hid)["bankrupt"] else ""])
 	_modal("账簿", "", lines, [["关闭", func(): _close_modal()]])
+
+
+## What a house is up to: ships and their cargo, workshops, lighthouse needs, strongholds.
+func _show_rival(hid: String) -> void:
+	if hid == sim.pid():
+		_show_ledger()
+		return
+	var d: Dictionary = GameData.HOUSES[hid]
+	var h := sim.house(hid)
+	var lines := []
+	lines.append("当家 %s · 特长：%s · 名声「%s」%s" % [d["leader"], d["perk_text"], GameData.REP_NAMES[sim.rep_level(hid) - 1], " · 已破产" if h["bankrupt"] else ""])
+	var band := int(maxf(0.0, float(h["gold"])) / 10000.0) * 10000
+	lines.append("家底：约 %s 金%s" % [UiKit.money(band), ("，欠款 %s" % UiKit.money(h["debt"])) if h["debt"] > 0.5 else ""])
+	var lh: Dictionary = h["lh"]
+	var lh_text := "灯塔 %d/3" % int(lh["stage"])
+	if lh["building"]:
+		lh_text += "，正在施工，还要 %d 天" % maxi(0, int(lh["end"]) - int(sim.s["day"]))
+	elif int(lh["stage"]) < GameData.LIGHTHOUSE.size():
+		var need := AiPlayer._needs(sim, hid)
+		var parts := []
+		for g in need:
+			parts.append("%s %d" % [GameData.good_name(g), int(need[g])])
+		var cost: int = GameData.LIGHTHOUSE[int(lh["stage"])]["gold"]
+		var gold_gap := ("还差约 %s 金" % UiKit.money(cost - h["gold"])) if h["gold"] < cost else "钱够了"
+		lh_text += "，下一阶「%s」：%s，%s" % [GameData.LIGHTHOUSE[int(lh["stage"])]["name"], ("还缺 " + "、".join(parts)) if not parts.is_empty() else "材料齐了", gold_gap]
+	lines.append(lh_text)
+	for sh in sim.ships_of(hid):
+		var st := ""
+		if sim.docked(sh):
+			st = "停靠 %s" % GameData.port_name(sh["port"])
+		else:
+			st = "%s → %s，剩 %d 天" % [GameData.port_name(sh["from"]), GameData.port_name(sh["to"]), maxi(0, int(sh["arrive"]) - int(sim.s["day"]))]
+		var cargo := []
+		for g in sh["cargo"]:
+			cargo.append("%s %d" % [GameData.good_name(g), int(sh["cargo"][g]["qty"])])
+		lines.append("· %s（%s）：%s%s" % [sh["name"] if sh["name"] != "" else GameData.SHIPS[sh["type"]]["name"], GameData.SHIPS[sh["type"]]["name"], st, ("，载 " + "、".join(cargo)) if not cargo.is_empty() else "，空载"])
+	var builds := {}
+	for b in Industry.all_buildings(sim, hid):
+		var key: String = GameData.port_name(b["port"])
+		if not builds.has(key):
+			builds[key] = []
+		builds[key].append("%s%s" % [GameData.good_name(b["plot"]["b"]), ("×%d 级" % int(b["plot"]["lvl"])) if int(b["plot"]["lvl"]) > 1 else ""])
+	var bl := []
+	for k in builds:
+		bl.append("%s（%s）" % [k, "、".join(builds[k])])
+	lines.append("工坊：%s" % ("；".join(bl) if not bl.is_empty() else "暂无"))
+	var pats := []
+	for port in sim.open_ports():
+		if sim.patron(port) == hid:
+			pats.append(GameData.port_name(port))
+	lines.append("港主：%s" % ("、".join(pats) if not pats.is_empty() else "暂无"))
+	var bps := []
+	for g in h["bp"]:
+		bps.append(GameData.good_name(g))
+	lines.append("持有图纸：%s" % ("、".join(bps) if not bps.is_empty() else "无"))
+	_modal("%s · 动向" % d["name"], "", lines, [["关闭", func(): _close_modal()]], 720)
 
 
 func _show_menu() -> void:

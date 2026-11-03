@@ -603,6 +603,14 @@ func test_explore() -> void:
 	rh["gold"] = 100.0
 	var raid2 := sim._rival_raid(rv, "qianqi", true)
 	check(raid2["result"] != "toll", "a broke rival loses cargo instead (%s)" % str(raid2))
+	# eastern companions
+	sim.house()["gold"] = 60000.0
+	check("lusheng" in sim.recruitable_at("qinglu", "tavern"), "芦生 waits in the 青芦港 tavern")
+	var west_sell := sim.sell_price("qianqi", "wine")
+	check(sim.recruit("lusheng", "qinglu", "tavern")["ok"] and sim.sell_price("qianqi", "wine") > west_sell, "芦生 raises western prices for eastern wares (%d -> %d)" % [west_sell, sim.sell_price("qianqi", "wine")])
+	sim.add_friend("jinduo", sim.pid(), 150)
+	var east_days := sim.travel_days("qinglu", "jinduo", "freighter")
+	check(sim.recruit("duoyin", "jinduo", "guild")["ok"] and sim.travel_days("qinglu", "jinduo", "freighter") <= east_days, "铎音 shortens eastern voyages")
 	# save / load keeps the charts
 	var json := sim.to_json()
 	var sim2 := Sim.new()

@@ -8,7 +8,7 @@ class_name Characters
 ## cond keys: story (main story stage), rep (level), friend (level at the port), wins (battles won),
 ##            visited (ports seen), craft_bp (craft blueprints owned), workshops (owned), refits.
 
-const PORTRAITS := {"luqing": 5, "qian": 2, "aman": 7, "shen": 3, "cen": 1, "xiaoman": 4, "moyu": 6, "ning": 2, "feng": 0, "sang": 1, "helan": 7, "ling": 5}
+const PORTRAITS := {"luqing": 5, "qian": 2, "aman": 7, "shen": 3, "cen": 1, "xiaoman": 4, "moyu": 6, "ning": 2, "feng": 0, "sang": 1, "helan": 7, "ling": 5, "duoyin": 3, "lusheng": 4}
 
 const POSTS := {
 	"nav": {"name": "航海长", "abil": "sail", "desc": "每级航程 −1%、甩开云盗 +2%"},
@@ -155,8 +155,31 @@ const CHARS := {
 			{"title": "灯", "text": "灵说她的使命是守着灯塔不再出事。「你的灯，我来守。」",
 			 "choices": [{"label": "「那就一起守。」", "fx": {"aff": 20, "spec_up": true, "say": "从此你的船队出航时，总有云鲸相随。"}}, {"label": "郑重点头", "fx": {"aff": 12, "spec_up": true}}]},
 		]},
+	# ---- the eastern sea (round 12)
+	"duoyin": {"name": "铎音", "title": "金铎城的铸钟女匠", "style": "声音洪亮，说话像敲钟，认死理。",
+		"abil": {"sail": 6, "trade": 3, "fight": 4, "charm": 4}, "spec": "eastern", "spec_name": "东海领航",
+		"spec_desc": "去东云域的航程 −10%，东边遇上云盗的概率减半。", "port": "jinduo", "where": "guild", "cond": {"friend": 1}, "fee": 2600, "wage": 340,
+		"story": [
+			{"title": "哑钟", "text": "铎音铸了一口钟，敲不响。她盯着它看了一整天，一句话不说。",
+			 "choices": [{"label": "陪她把钟砸了重铸", "fx": {"aff": 15, "say": "第二口钟一响，半个城都抬起了头。"}}, {"label": "劝她算了", "fx": {"aff": 3}}]},
+			{"title": "西边的铜", "text": "铎音想试试西边铜鹤矶的赤铜，说那边的铜声音更亮，只是贵。",
+			 "choices": [{"label": "送她一船赤铜（1,500 金）", "fx": {"gold": -1500, "aff": 15, "say": "她用那批铜铸了一口送你的船钟。"}}, {"label": "让她自己攒", "fx": {"aff": 5}}]},
+			{"title": "千钟齐鸣", "text": "整点钟响，铎音说城里一千口钟里有三十口是她铸的。「我想让西边也听见。」",
+			 "choices": [{"label": "「我的船替你带过去。」", "fx": {"aff": 20, "spec_up": true, "say": "从此你的旗舰每到一港，先响一声金铎城的钟。"}}, {"label": "举杯", "fx": {"aff": 12, "spec_up": true}}]},
+		]},
+	"lusheng": {"name": "芦生", "title": "青芦港的酒坊少年", "style": "好奇心重，什么都想尝一口。",
+		"abil": {"sail": 2, "trade": 5, "fight": 1, "charm": 5}, "spec": "brewer", "spec_name": "东货行家",
+		"spec_desc": "东云域出产的加工品（霞果酒、铜件、琉璃、熏鱼、灯油）在西边卖价 +6%。", "port": "qinglu", "where": "tavern", "cond": {}, "fee": 800, "wage": 150,
+		"story": [
+			{"title": "第一口西酒", "text": "芦生尝了一口西边的酒，皱着眉说太甜。然后又喝了三碗。",
+			 "choices": [{"label": "带他去千旗市见世面", "fx": {"aff": 15, "say": "他在千旗市的酒楼里喝到了天亮。"}}, {"label": "笑他", "fx": {"aff": 5}}]},
+			{"title": "酒坊的债", "text": "芦生家的酒坊欠了焦岩堡的黑市一笔钱，对方说下个月不还就烧坊。",
+			 "choices": [{"label": "替他还清（1,000 金）", "fx": {"gold": -1000, "aff": 15, "say": "酒坊保住了，芦生把最老的一坛酒开给你。"}}, {"label": "让他想办法", "fx": {"aff": 2}}]},
+			{"title": "两边的味道", "text": "芦生说他想酿一种西边人也爱喝的酒：「东边的芦，西边的霞果。」",
+			 "choices": [{"label": "出资办一间酒坊（2,000 金）", "fx": {"gold": -2000, "aff": 20, "spec_up": true, "say": "那酒后来成了千旗市最贵的一种。"}}, {"label": "答应以后", "fx": {"aff": 10, "spec_up": true}}]},
+		]},
 }
-const IDS := ["xiaoman", "luqing", "qian", "aman", "shen", "cen", "moyu", "ning", "feng", "sang", "helan", "ling"]
+const IDS := ["xiaoman", "luqing", "qian", "aman", "shen", "cen", "moyu", "ning", "feng", "sang", "helan", "ling", "duoyin", "lusheng"]
 
 
 static func name_of(cid: String) -> String:
