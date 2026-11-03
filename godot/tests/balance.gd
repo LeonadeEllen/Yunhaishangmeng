@@ -1,10 +1,12 @@
 extends SceneTree
 ## Quick balance probe: N seeds of the greedy bot, prints when each house finishes each stage.
-## godot --headless --path godot -s res://tests/balance.gd
+## godot --headless --path godot -s res://tests/balance.gd   (SEEDS="66,77" picks the seeds)
 
 func _init() -> void:
-	var res := {}
-	for sd in [11, 22, 33, 44, 55, 66]:
+	var seeds := [11, 22, 33, 44, 55, 66]
+	if OS.get_environment("SEEDS") != "":
+		seeds = Array(OS.get_environment("SEEDS").split(",")).map(func(x): return int(x))
+	for sd in seeds:
 		var sim := Sim.new()
 		sim.new_game(sd)
 		var stage_day := {}
@@ -16,9 +18,15 @@ func _init() -> void:
 					won[hid] = int(won.get(hid, 0)) + 1
 			if "收购" in t:
 				buys += 1)
-		while sim.s["over"] == null and sim.s["crown"] == null and sim.s["day"] < 360 * 12:
+		var guard := 0
+		while sim.s["over"] == null and sim.s["crown"] == null and sim.s["day"] < 360 * 12 and guard < 360 * 13:
+			guard += 1
 			if sim.s["event"] != null:
 				EventBook.resolve(sim, 0)
+			if sim.s["encounter"] != null:
+				sim.auto_encounter()
+			if sim.s["discovery"] != null:
+				sim.s["discovery"] = null
 			for sh in sim.ships_of(sim.pid()):
 				if sim.docked(sh):
 					AiPlayer.ship_turn(sim, sh)

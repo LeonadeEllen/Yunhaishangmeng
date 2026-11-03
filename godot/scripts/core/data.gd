@@ -288,6 +288,16 @@ const WORK_MAX := 3
 const WORK_REP := 2                  # reputation level needed to fund city works
 const BENEFACTOR_DISCOUNT := 0.97    # the benefactor buys cheaper here
 const BENEFACTOR_REP := 10           # monthly reputation per city
+
+# the lantern festival (round 15): opens every new year with awards and a year-end review
+const FESTIVAL_DAYS := 12
+const FESTIVAL_PRIZE := 6000
+const FESTIVAL_REP := {"race": 150, "trade": 150, "works": 100}
+const FESTIVAL_GOODS := ["fruit", "silk", "wine"]   # sell for more while the lanterns are up
+const FESTIVAL_SELL := 1.15
+const RIVAL_RACE := 0.08             # two rival ships in one port may race each other
+const RIVAL_RACE_GAP := 30
+const RIVAL_RACE_STAKE := 1500
 const PLAYER := "lamp"
 
 # ------------------------------------------------------------------ protagonist

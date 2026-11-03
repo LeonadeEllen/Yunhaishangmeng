@@ -14,6 +14,7 @@ func _init() -> void:
 		test_explore()
 		test_rivals_and_hq()
 		test_city_works()
+		test_festival()
 		print("FAILURES: %d" % failures)
 		quit(1 if failures > 0 else 0)
 		return
@@ -31,6 +32,7 @@ func _init() -> void:
 	test_explore()
 	test_rivals_and_hq()
 	test_city_works()
+	test_festival()
 	var seeds := [11, 22, 33, 44, 55]
 	var crowns := 0
 	var bot_stage := 0
@@ -674,6 +676,68 @@ func test_city_works() -> void:
 	check(funded, "a rich rival funds works in its home city")
 	var sim2 := Sim.new()
 	check(sim2.from_json(sim.to_json()) and sim2.work_level(port, "school") == 3 and sim2.benefactor(port) == "iron", "works survive save/load")
+
+
+func test_festival() -> void:
+	print("the lantern festival and rival races")
+	var sim := Sim.new()
+	sim.new_game(15)
+	var fl := sim.flagship()
+	check(not sim.festival_on(), "no festival in the first year")
+	var sell0 := sim.sell_price(fl["port"], "fruit")
+	sim.house()["gold"] = 90000.0   # the biggest gain in worth this year
+	var rep := {}
+	for hid in GameData.HOUSE_IDS:
+		rep[hid] = int(sim.house(hid)["rep"])
+	sim.s["day"] = GameData.DAYS_YEAR - 1
+	sim.s["event"] = null
+	sim.advance_day()
+	var f = sim.s["festival_show"]
+	check(f != null and int(f["year"]) == 1 and f["houses"].size() == 3, "the new year opens the festival with a review of every house")
+	var kinds: Array = f["awards"].map(func(a): return a["kind"])
+	check("race" in kinds and "trade" in kinds, "a race prize and a merchant prize are handed out (%s)" % str(kinds))
+	var trade_winner := ""
+	for a in f["awards"]:
+		if a["kind"] == "trade":
+			trade_winner = a["hid"]
+	check(trade_winner == sim.pid() and int(sim.house()["rep"]) >= rep[sim.pid()] + GameData.FESTIVAL_REP["trade"], "the merchant prize goes to the biggest gain and pays reputation")
+	check(sim.festival_on() and sim.sell_price(fl["port"], "fruit") > sell0, "festival goods sell for more while the lanterns are up")
+	sim.s["day"] = GameData.DAYS_YEAR + GameData.FESTIVAL_DAYS
+	check(not sim.festival_on(), "the festival ends after %d days" % GameData.FESTIVAL_DAYS)
+	check(sim.s["festival"]["worth"].has("iron") and int(sim.s["festival"]["year"]) == 1, "the year's worth is remembered for next year's prize")
+	# a benefactor of two cities takes the builders' prize
+	sim.house()["rep"] = 1000
+	sim.house()["gold"] = 100000.0
+	sim.fund_work("qianqi", "dock")
+	sim.fund_work("muxia", "dock")
+	sim.s["day"] = GameData.DAYS_YEAR * 2 - 1
+	sim.s["festival_show"] = null
+	sim.s["story"] = 3   # the main story would otherwise block the day
+	sim.s["event"] = null
+	sim.advance_day()
+	var works_winner := ""
+	for a in sim.s["festival_show"]["awards"]:
+		if a["kind"] == "works":
+			works_winner = a["hid"]
+	check(works_winner == sim.pid(), "the builders' prize goes to the house with most benefactor cities")
+	# two rival ships in one port race now and then
+	sim.s["festival_show"] = null
+	var a: Dictionary = sim.ships_of("iron")[0]
+	var b: Dictionary = sim.ships_of("tower")[0]
+	var races := 0
+	for k in 60:
+		sim.s["day"] = 800 + k * 40
+		a["port"] = "fengyue"
+		a["to"] = ""
+		b["port"] = "fengyue"
+		b["to"] = ""
+		var n0 := int(sim.s["stats"].get("rival_races", 0))
+		AiPlayer.ship_turn(sim, a)
+		if int(sim.s["stats"].get("rival_races", 0)) > n0:
+			races += 1
+	check(races >= 1 and races <= 20, "rival captains race each other now and then (%d/60)" % races)
+	var sim2 := Sim.new()
+	check(sim2.from_json(sim.to_json()) and int(sim2.s["festival"]["year"]) == 2, "festival state survives save/load")
 
 
 ## Sail the flagship to dest and run days until it is docked again (or something interrupts).

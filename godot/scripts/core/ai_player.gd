@@ -15,6 +15,12 @@ static func ship_turn(sim: Sim, sh: Dictionary) -> void:
 	var home: String = GameData.HOUSES[hid]["home"]
 	if sim.in_fleet(sh):
 		sim.leave_fleet(int(sh["id"]))   # a captured prize trades on its own under the bot
+	# another house's captain docked here: now and then the two race (round 15)
+	if int(sim.s["day"]) - int(sim.s.get("rival_race_day", -999)) >= GameData.RIVAL_RACE_GAP and sim.rng.randf() < GameData.RIVAL_RACE:
+		for other in sim.s["ships"]:
+			if other["owner"] != hid and other["owner"] != sim.pid() and other["port"] == port and not sim.house(other["owner"])["bankrupt"]:
+				sim.rival_race(sh, other)
+				break
 	for c in sim.open_contracts(port):
 		if sim.can_fulfill(sh, c):
 			sim.fulfill(sh["id"], c["id"])

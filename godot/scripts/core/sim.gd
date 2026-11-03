@@ -640,6 +640,8 @@ func sell_price(port: String, good: String, hid: String = "") -> int:
 			m *= 1.0 + 0.08 * spec_bonus("foreign")
 		if GameData.region_of(port) == 1 and GameData.tier(good) == 2 and GameData.GOODS[good]["home"] == "":
 			m *= 1.0 + 0.06 * spec_bonus("brewer")   # the eastern processed goods, sold in the west
+	if good in GameData.FESTIVAL_GOODS and festival_on():
+		m *= GameData.FESTIVAL_SELL
 	return int(roundf(unit_price(port, good) * m))
 
 
@@ -2172,8 +2174,113 @@ func advance_day() -> void:
 	_tick_crew()
 	if day % GameData.DAYS_MONTH == 0:
 		_monthly()
+	if day % GameData.DAYS_YEAR == 0:
+		_festival()
 	_tick_crisis()
 	EventBook.maybe_trigger(self)
+
+
+# ------------------------------------------------------------------ the lantern festival (round 15)
+func festival_on() -> bool:
+	var day: int = s["day"]
+	return day >= GameData.DAYS_YEAR and day % GameData.DAYS_YEAR < GameData.FESTIVAL_DAYS
+
+
+## A house's fastest ship, as the race sees it.
+func race_speed(hid: String) -> float:
+	var best := 0.0
+	for sh in _ships_of(hid):
+		best = maxf(best, float(GameData.SHIPS[sh["type"]]["speed"]) * speed_mult(sh))
+	return best
+
+
+## New year: the festival opens, three prizes are handed out and the year is summed up for the UI.
+func _festival() -> void:
+	var year: int = int(s["day"]) / GameData.DAYS_YEAR
+	var prev: Dictionary = s.get("festival", {}) if s.get("festival") != null else {}
+	var worth0: Dictionary = prev.get("worth", {})
+	var snap0: Dictionary = prev.get("snap", {})
+	var alive := []
+	for hid in GameData.HOUSE_IDS:
+		if not house(hid)["bankrupt"]:
+			alive.append(hid)
+	var awards := []
+	# the race: fastest ship, with a little luck
+	var best := ""
+	var best_v := 0.0
+	for hid in alive:
+		var v := race_speed(hid) * rng.randf_range(0.9, 1.1)
+		if v > best_v:
+			best_v = v
+			best = hid
+	if best != "":
+		awards.append({"kind": "race", "hid": best, "text": "赛船冠军：%s（%s的船最快）" % [GameData.HOUSES[best]["name"], GameData.HOUSES[best]["leader"]]})
+	# the merchant prize: the biggest gain in net worth this year
+	var gains := {}
+	best = ""
+	best_v = -INF
+	for hid in alive:
+		var g := net_worth(hid) - float(worth0.get(hid, float(GameData.HOUSES[hid]["gold"])))
+		gains[hid] = g
+		if g > best_v:
+			best_v = g
+			best = hid
+	if best != "":
+		awards.append({"kind": "trade", "hid": best, "text": "年度商王：%s（这一年身家多了约 %s 金）" % [GameData.HOUSES[best]["name"], UiKit.money(floorf(best_v / 1000.0) * 1000.0)]})
+	# the builders' prize: most cities as benefactor (unique)
+	best = ""
+	var best_n := 0
+	var tie := false
+	for hid in alive:
+		var n := benefactor_ports(hid).size()
+		if n > best_n:
+			best_n = n
+			best = hid
+			tie = false
+		elif n == best_n and n > 0:
+			tie = true
+	if best != "" and not tie:
+		awards.append({"kind": "works", "hid": best, "text": "建设之光：%s（%d 座城的恩主）" % [GameData.HOUSES[best]["name"], best_n]})
+	for a in awards:
+		var h := house(a["hid"])
+		h["gold"] += float(GameData.FESTIVAL_PRIZE)
+		h["month_in"] += float(GameData.FESTIVAL_PRIZE)
+		add_rep(a["hid"], int(GameData.FESTIVAL_REP[a["kind"]]))
+		_say("灯节 · %s，奖金 %d 金，名声 +%d。" % [a["text"], GameData.FESTIVAL_PRIZE, int(GameData.FESTIVAL_REP[a["kind"]])], "major" if a["hid"] == pid() else "rival")
+	var houses := []
+	for hid in GameData.HOUSE_IDS:
+		var h := house(hid)
+		houses.append({"hid": hid, "worth": net_worth(hid), "gain": float(gains.get(hid, 0.0)), "ships": _ships_of(hid).size(),
+			"workshops": Industry.all_buildings(self, hid).size(), "bens": benefactor_ports(hid).size(), "lh": int(h["lh"]["stage"]), "bankrupt": h["bankrupt"]})
+	var st: Dictionary = s["stats"]
+	var mine := {"gain": float(gains.get(pid(), 0.0)),
+		"trades": int(st.get("trades", 0)) - int(snap0.get("trades", 0)),
+		"contracts": int(st.get("contracts", 0)) - int(snap0.get("contracts", 0)),
+		"wins": int(st.get("wins", 0)) - int(snap0.get("wins", 0)),
+		"crew": s["crew"].size(), "visited": s["hero"]["visited"].size()}
+	s["festival_show"] = {"year": year, "awards": awards, "houses": houses, "mine": mine}
+	var worth := {}
+	for hid in GameData.HOUSE_IDS:
+		worth[hid] = net_worth(hid)
+	s["festival"] = {"year": year, "worth": worth, "snap": {"trades": int(st.get("trades", 0)), "contracts": int(st.get("contracts", 0)), "wins": int(st.get("wins", 0))}}
+	_say("第 %d 年灯节开幕：%d 天内甜霞果、丝云绸、霞果酒各港卖价 +%d%%。" % [year + 1, GameData.FESTIVAL_DAYS, int(roundf((GameData.FESTIVAL_SELL - 1.0) * 100.0))], "month")
+
+
+## Two rival ships in the same port may race each other (round 15).
+func rival_race(a: Dictionary, b: Dictionary) -> void:
+	var ha: String = a["owner"]
+	var hb: String = b["owner"]
+	var va := float(GameData.SHIPS[a["type"]]["speed"]) * speed_mult(a) * rng.randf_range(0.9, 1.1)
+	var vb := float(GameData.SHIPS[b["type"]]["speed"]) * speed_mult(b) * rng.randf_range(0.9, 1.1)
+	var win := ha if va >= vb else hb
+	var lose := hb if win == ha else ha
+	var stake := minf(float(GameData.RIVAL_RACE_STAKE), maxf(0.0, house(lose)["gold"]))
+	house(win)["gold"] += stake
+	house(lose)["gold"] -= stake
+	add_rep(win, 30)
+	s["rival_race_day"] = int(s["day"])
+	s["stats"]["rival_races"] = int(s["stats"].get("rival_races", 0)) + 1
+	_say("%s和%s在 %s 外海赛了一程，%s赢了，拿走 %d 金。" % [GameData.HOUSES[ha]["leader"], GameData.HOUSES[hb]["leader"], GameData.port_name(a["port"]), GameData.HOUSES[win]["name"], int(stake)], "rival")
 
 
 func _tick_markets() -> void:
@@ -2517,4 +2624,10 @@ func from_json(text: String) -> bool:
 		s["houses"][hid]["hq"] = int(s["houses"][hid].get("hq", 0))
 	if s.has("rival_met"):
 		s["rival_met"] = int(s["rival_met"])
+	if s.get("festival") != null:
+		s["festival"]["year"] = int(s["festival"]["year"])
+		for k in s["festival"]["snap"]:
+			s["festival"]["snap"][k] = int(s["festival"]["snap"][k])
+	if s.get("festival_show") != null:
+		s["festival_show"]["year"] = int(s["festival_show"]["year"])
 	return true

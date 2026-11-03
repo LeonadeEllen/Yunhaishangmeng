@@ -328,6 +328,21 @@ func _draw() -> void:
 		draw_circle(tp + Vector2(3, 4), tr, Color(0, 0, 0, 0.12))
 		draw_circle(tp, tr, [Color(0.45, 0.6, 0.42), Color(0.55, 0.66, 0.4), Color(0.4, 0.56, 0.5)][int(t["k"])])
 		draw_circle(tp + Vector2(-tr * 0.3, -tr * 0.3), tr * 0.45, Color(1, 1, 1, 0.18))
+	# lantern festival: strings of lanterns along the roads (round 15)
+	if sim.festival_on():
+		var lr := RandomNumberGenerator.new()
+		lr.seed = 77 + int(p["island"])
+		for b in _buildings:
+			var d: Vector2 = b["door"]
+			var mid := Vector2(d.x, plaza.y) if absf(d.x - plaza.x) > absf(d.y - plaza.y) else Vector2(plaza.x, d.y)
+			for seg in [[plaza, mid], [mid, d]]:
+				var n := int(seg[0].distance_to(seg[1]) / 46.0)
+				for i in n:
+					var lp2: Vector2 = seg[0].lerp(seg[1], (float(i) + 0.5) / float(maxi(n, 1))) + Vector2(0, -26 + sin(_t * 2.0 + i) * 2.0)
+					var lc: Color = [Color(0.95, 0.45, 0.3), Color(0.98, 0.78, 0.35), Color(0.9, 0.35, 0.45)][lr.randi_range(0, 2)]
+					draw_circle(lp2, 9, Color(lc, 0.22))
+					draw_circle(lp2, 5, lc)
+					draw_line(lp2 + Vector2(0, -5), lp2 + Vector2(0, -11), Color(0.35, 0.25, 0.2), 1.5)
 	# the benefactor's statue on the plaza (round 14)
 	var ben := sim.benefactor(port)
 	if ben != "":
@@ -384,7 +399,7 @@ func _draw() -> void:
 		for b in _buildings:
 			draw_circle(b["pos"] + Vector2(0, b["size"].y * 0.1), 34, Color(1.0, 0.8, 0.45, night * 0.35))
 	# title & hint
-	var title := "%s · 城中" % p["name"]
+	var title := "%s · 城中%s" % [p["name"], " · 灯节" if sim.festival_on() else ""]
 	var hint := "WASD / 方向键走动 · 点击建筑进入 · Esc 回到海图"
 	var tw1 := font.get_string_size(title, HORIZONTAL_ALIGNMENT_LEFT, -1, 22).x
 	var tw2 := font.get_string_size(hint, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x

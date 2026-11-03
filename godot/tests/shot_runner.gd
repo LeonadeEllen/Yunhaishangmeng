@@ -296,6 +296,19 @@ func run(m: Control) -> void:
 	await _wait(0.6)
 	await _shot("26_town_statue")
 	main._leave_town()
+	# round 15: the lantern festival and its year review
+	main.sim.s["day"] = GameData.DAYS_YEAR - 1
+	main.sim.s["event"] = null
+	main.sim.advance_day()
+	main._show_festival()
+	await _wait(0.4)
+	await _shot("27_festival")
+	main._close_modal()
+	main._open_port("qianqi", 0)
+	main._enter_town()
+	await _wait(0.6)
+	await _shot("28_town_lanterns")
+	main._leave_town()
 	main.sim.s["crown"] = {"hid": main.sim.pid(), "day": main.sim.s["day"]}
 	main._crown_celebration()
 	await _wait(0.4)

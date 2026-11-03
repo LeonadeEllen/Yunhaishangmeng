@@ -219,6 +219,7 @@ func _show_help() -> void:
 		"· 对手：灯油行会靠跑商、铁誓舰团靠船队（船便宜、航速快）、白塔议士靠产业（工坊便宜、产地多产）。云盗对谁都下手，对手的船也会被劫。",
 		"· 相遇：旗舰停进对手船所在的港口时，对手的当家可能来打招呼：和韦朔赛船赌金、和殷望舒当众论道赌名声、向他们买地契和图纸、买通港务拖住他们的船，或者只是喝一杯。伙伴之间好感够高也会在港口发生他们自己的故事，进城时还能在街上碰到他们。",
 		"· 会馆：在老家的商馆页扩建商会总部（三级）：伙伴上限、每月名声、伙伴薪水折扣，最高一级船队上限 +1。",
+		"· 灯节：每年开春灯节，三项颁奖（赛船冠军看最快的船、年度商王看一年身家涨幅、建设之光看恩主城数），奖金与名声，并回顾各家这一年。灯节 12 天里甜霞果、丝云绸、霞果酒卖价 +15%。对手的船在同一港相遇时也会互相赛船。",
 		"· 城建：在任何城主府出资修码头（补给更省、修船更快）、集市（行情恢复更快）、学堂（本城工坊增产），每项三级，全城受益。出资最多的商会是本城恩主：买货更便宜、每月得名声、城中立像。对手有钱时也会出资来争。",
 		"· 灯塔：三层灯塔是云海盟主的象征，不建也可以一直玩下去。金币为负超过 30 天会破产。",
 	], [["明白了", func(): _close_modal()]])
@@ -435,7 +436,12 @@ func _after_day() -> bool:
 	var stop := false
 	var fl := sim.flagship()
 	var now_docked := not fl.is_empty() and sim.docked(fl)
-	if sim.s.get("discovery") != null:
+	if sim.s.get("festival_show") != null:
+		sfx("bell")
+		_set_speed(0)
+		_show_festival()
+		stop = true
+	elif sim.s.get("discovery") != null:
 		sfx("bell")
 		_set_speed(0)
 		_show_discovery()
@@ -908,6 +914,43 @@ func _show_discovery() -> void:
 	if d["kind"] == "passage":
 		map.set_region(2)
 	_modal(d["title"], "explore_scene", d["lines"], [["继续", func(): _close_modal(); _after_discovery()]])
+
+
+## New year's lantern festival: the prizes and a review of the year (round 15).
+func _show_festival() -> void:
+	var f = sim.s.get("festival_show")
+	if f == null:
+		return
+	sim.s["festival_show"] = null
+	var lines := []
+	if f["awards"].is_empty():
+		lines.append("今年没有颁出奖项。")
+	for a in f["awards"]:
+		lines.append(("★ " if a["hid"] == sim.pid() else "· ") + a["text"] + "，奖金 %s 金、名声 +%d" % [UiKit.money(GameData.FESTIVAL_PRIZE), int(GameData.FESTIVAL_REP[a["kind"]])])
+	var v := _modal("第 %d 年 · 灯节" % (int(f["year"]) + 1), "events/15", lines, [["继续", func(): _close_modal(); _refresh_all()]], 760)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 4)
+	box.add_child(UiKit.label("各家这一年", 17, UiKit.INK, true))
+	for hrow in f["houses"]:
+		var d: Dictionary = GameData.HOUSES[hrow["hid"]]
+		var hb := HBoxContainer.new()
+		hb.add_theme_constant_override("separation", 8)
+		hb.add_child(UiKit.icon(UiKit.sprite("emblems", d["emblem"]), 24))
+		var mine_row: bool = hrow["hid"] == sim.pid()
+		var band := floorf(float(hrow["worth"]) / 10000.0) * 10000.0
+		var txt := "%s · 身家约 %s（%s）· 船 %d · 工坊 %d · 恩主 %d 城 · 灯塔 %d/3%s" % [d["name"], UiKit.money(band), _signed(floorf(float(hrow["gain"]) / 1000.0) * 1000.0), int(hrow["ships"]), int(hrow["workshops"]), int(hrow["bens"]), int(hrow["lh"]), " · 已破产" if hrow["bankrupt"] else ""]
+		hb.add_child(UiKit.label(txt, 13, UiKit.INK if mine_row else UiKit.MUTED, mine_row))
+		box.add_child(hb)
+	var m: Dictionary = f["mine"]
+	box.add_child(HSeparator.new())
+	box.add_child(UiKit.label("你的这一年", 17, UiKit.INK, true))
+	box.add_child(UiKit.para("身家 %s 金 · 成交 %d 笔 · 委托 %d 件 · 剿匪 %d 胜 · 伙伴 %d 人 · 到过 %d 座港。灯节的 %d 天里，甜霞果、丝云绸、霞果酒各港卖价 +%d%%。" % [_signed(float(m["gain"])), int(m["trades"]), int(m["contracts"]), int(m["wins"]), int(m["crew"]), int(m["visited"]), GameData.FESTIVAL_DAYS, int(roundf((GameData.FESTIVAL_SELL - 1.0) * 100.0))], 14))
+	v.add_child(box)
+	v.move_child(box, v.get_child_count() - 2)
+
+
+func _signed(v: float) -> String:
+	return ("+" if v >= 0.0 else "−") + UiKit.money(absf(v))
 
 
 func _after_discovery() -> void:
