@@ -13,6 +13,7 @@ func _init() -> void:
 		test_crew()
 		test_explore()
 		test_rivals_and_hq()
+		test_city_works()
 		print("FAILURES: %d" % failures)
 		quit(1 if failures > 0 else 0)
 		return
@@ -29,6 +30,7 @@ func _init() -> void:
 	test_crew()
 	test_explore()
 	test_rivals_and_hq()
+	test_city_works()
 	var seeds := [11, 22, 33, 44, 55]
 	var crowns := 0
 	var bot_stage := 0
@@ -615,6 +617,63 @@ func test_rivals_and_hq() -> void:
 	check(int(sim.house()["rep"]) >= rep0 + int(GameData.HQ[3]["rep"]), "the hall earns reputation monthly (%d -> %d)" % [rep0, int(sim.house()["rep"])])
 	var sim2 := Sim.new()
 	check(sim2.from_json(sim.to_json()) and sim2.hq_level() == 3 and sim2.s["pairs_done"].size() == 1, "HQ level and pair scenes survive save/load")
+
+
+func test_city_works() -> void:
+	print("city works and benefactors")
+	var sim := Sim.new()
+	sim.new_game(14)
+	var fl := sim.flagship()
+	var port: String = fl["port"]
+	check(not sim.work_ok(port, "dock")["ok"], "city works need reputation 船东 first")
+	sim.house()["rep"] = 200
+	sim.house()["gold"] = 200000.0
+	var fuel0 := sim.fuel_cost_for(fl, "muxia")
+	var f0 := sim.friend_pts(port)
+	var g0: float = sim.house()["gold"]
+	check(sim.fund_work(port, "dock")["ok"] and sim.work_level(port, "dock") == 1 and sim.house()["gold"] == g0 - 10000.0 and sim.friend_pts(port) > f0, "funding the docks costs 10,000 and raises friendship")
+	check(sim.benefactor(port) == sim.pid() and sim.benefactor_ports() == [port], "the only funder is the city's benefactor")
+	check(sim.fuel_cost_for(fl, "muxia") < fuel0, "docks cut supplies for voyages from here (%d -> %d)" % [fuel0, sim.fuel_cost_for(fl, "muxia")])
+	var buy_plain := sim.buy_price(port, "silk", "iron")
+	check(sim.buy_price(port, "silk") < buy_plain, "the benefactor buys cheaper here")
+	# the market recovers faster with a bigger marketplace
+	var m: Dictionary = sim.s["ports"][port]["market"]["silk"]
+	m["stock"] = float(m["eq"]) * 0.5
+	sim._tick_markets()
+	var slow: float = m["stock"]
+	m["stock"] = float(m["eq"]) * 0.5
+	sim.fund_work(port, "market")
+	sim._tick_markets()
+	check(m["stock"] > slow, "a bigger market recovers faster (%.1f vs %.1f)" % [m["stock"], slow])
+	# the school raises workshop output in this city
+	sim.house()["bp"]["cocoon"] = true
+	var pl := {"b": "cocoon", "lvl": 1, "owner": sim.pid()}
+	var out0 := Industry.output(sim, port, pl)
+	sim.fund_work(port, "school")
+	sim.fund_work(port, "school")
+	check(Industry.output(sim, port, pl) > out0, "a school raises output here (%d -> %d)" % [out0, Industry.output(sim, port, pl)])
+	check(sim.fund_work(port, "school")["ok"] and not sim.fund_work(port, "school")["ok"], "each work stops at level %d" % GameData.WORK_MAX)
+	# a rival can outspend you and take the title
+	sim.house("iron")["gold"] = 500000.0
+	for k in ["dock", "dock", "market", "market"]:
+		sim.fund_work(port, k, "iron")
+	check(sim.benefactor(port) == "iron", "the biggest funder becomes the benefactor")
+	# monthly reputation for the benefactor, and the AI funds works when flush
+	var rep0: int = sim.house("iron")["rep"]
+	sim.s["day"] = GameData.DAYS_MONTH * 3 - 1
+	sim.advance_day()
+	check(int(sim.house("iron")["rep"]) >= rep0 + GameData.BENEFACTOR_REP, "a benefactor earns reputation monthly")
+	var tw := sim.house("tower")
+	tw["gold"] = 400000.0
+	var funded := false
+	for k in 12:
+		AiPlayer.monthly(sim, "tower")
+		if float(sim.works("xiajing")["spent"].get("tower", 0.0)) > 0.0:
+			funded = true
+			break
+	check(funded, "a rich rival funds works in its home city")
+	var sim2 := Sim.new()
+	check(sim2.from_json(sim.to_json()) and sim2.work_level(port, "school") == 3 and sim2.benefactor(port) == "iron", "works survive save/load")
 
 
 ## Sail the flagship to dest and run days until it is docked again (or something interrupts).

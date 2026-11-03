@@ -227,7 +227,7 @@ func _init_port(pid: String) -> void:
 		if g in p["make"] or g in p["want"]:
 			eq *= rng.randf_range(0.8, 1.25)   # every run has its own strong and weak routes
 		m[g] = {"stock": eq * rng.randf_range(0.85, 1.15), "eq": eq}
-	s["ports"][pid] = {"market": m, "friend": {}}
+	s["ports"][pid] = {"market": m, "friend": {}, "works": _new_works()}
 	Industry.init_port(self, pid)
 	s["intel"][pid] = null
 
@@ -498,10 +498,97 @@ func unit_price(port: String, good: String, stock_override: float = -1.0) -> flo
 func _discount(hid: String, port: String) -> float:
 	var pat := patron(port)
 	var d := GameData.PATRON_FEE if pat != "" and pat != hid else 1.0
+	if benefactor(port) == hid:
+		d *= GameData.BENEFACTOR_DISCOUNT
 	if hid == pid():
 		d *= 1.0 - 0.01 * float(hero_abil("trade") - 1)
 		d *= (1.0 - 0.004 * float(post_level("acct"))) * (1.0 - 0.03 * spec_bonus("haggle"))
 	return d
+
+
+# ------------------------------------------------------------------ city works (round 14)
+static func _new_works() -> Dictionary:
+	return {"lvl": {"dock": 0, "market": 0, "school": 0}, "spent": {}}
+
+
+func works(port: String) -> Dictionary:
+	var p: Dictionary = s["ports"][port]
+	if not p.has("works"):
+		p["works"] = _new_works()
+	return p["works"]
+
+
+func work_level(port: String, k: String) -> int:
+	return int(works(port)["lvl"].get(k, 0))
+
+
+## The house that has put the most gold into this city's works (ties: nobody).
+func benefactor(port: String) -> String:
+	var spent: Dictionary = works(port)["spent"]
+	var best := ""
+	var best_v := 0.0
+	var tie := false
+	for hid in spent:
+		var v := float(spent[hid])
+		if v > best_v:
+			best = hid
+			best_v = v
+			tie = false
+		elif v == best_v and v > 0.0:
+			tie = true
+	return "" if tie else best
+
+
+func work_ok(port: String, k: String, hid: String = "") -> Dictionary:
+	if hid == "":
+		hid = pid()
+	if not GameData.WORKS.has(k):
+		return _fail("没有这项城建。")
+	var lvl := work_level(port, k)
+	if lvl >= GameData.WORK_MAX:
+		return _fail("%s已是最高级。" % GameData.WORKS[k]["name"])
+	if hid == pid() and rep_level() < GameData.WORK_REP:
+		return _fail("名声要到「%s」。" % GameData.REP_NAMES[GameData.WORK_REP - 1])
+	var cost: int = GameData.WORK_COST[lvl + 1]
+	if house(hid)["gold"] < float(cost):
+		return _fail("需要 %d 金。" % cost)
+	return {"ok": true, "msg": "", "cost": cost}
+
+
+func fund_work(port: String, k: String, hid: String = "") -> Dictionary:
+	if hid == "":
+		hid = pid()
+	var ok := work_ok(port, k, hid)
+	if not ok["ok"]:
+		return ok
+	var cost := float(ok["cost"])
+	var h := house(hid)
+	h["gold"] -= cost
+	h["month_out"] += cost
+	var w := works(port)
+	var before := benefactor(port)
+	w["lvl"][k] = work_level(port, k) + 1
+	w["spent"][hid] = float(w["spent"].get(hid, 0.0)) + cost
+	var lvl := work_level(port, k)
+	add_friend(port, hid, 40 * lvl)
+	add_rep(hid, 20 * lvl)
+	var msg := "%s出资 %d 金，%s的%s升到 %d 级。" % [GameData.HOUSES[hid]["name"], int(cost), GameData.port_name(port), GameData.WORKS[k]["name"], lvl]
+	var after := benefactor(port)
+	if after != before and after != "":
+		msg += "%s成为 %s 的恩主。" % [GameData.HOUSES[after]["name"], GameData.port_name(port)]
+	_say(msg, "major" if hid == pid() else "rival")
+	return {"ok": true, "msg": msg}
+
+
+## Cities where this house is the benefactor.
+func benefactor_ports(hid: String = "") -> Array:
+	if hid == "":
+		hid = pid()
+	var out := []
+	for port in open_ports():
+		if benefactor(port) == hid:
+			out.append(port)
+	return out
 
 
 ## The house with the most buildings in a port (ties: nobody). Others pay a harbour fee there.
@@ -619,6 +706,8 @@ func fuel_cost_for(sh: Dictionary, to: String) -> int:
 	var c := 0
 	for o in fleet_ships(sh):
 		c += days * int(GameData.SHIPS[o["type"]]["fuel_day"]) * GameData.FUEL_PRICE
+	if GameData.PORTS.has(sh["port"]):
+		c = int(roundf(float(c) * (1.0 - 0.1 * float(work_level(sh["port"], "dock")))))
 	return c
 
 
@@ -2092,7 +2181,7 @@ func _tick_markets() -> void:
 		var m: Dictionary = s["ports"][pid]["market"]
 		for g in GameData.GOOD_IDS:
 			var e: Dictionary = m[g]
-			e["stock"] = maxf(0.0, e["stock"] + (e["eq"] - e["stock"]) * REVERT)
+			e["stock"] = maxf(0.0, e["stock"] + (e["eq"] - e["stock"]) * REVERT * (1.0 + 0.3 * float(work_level(pid, "market"))))
 
 
 func _tick_fashion() -> void:
@@ -2122,7 +2211,8 @@ func _tick_ships() -> void:
 			_on_arrive(sh)
 		elif docked(sh):
 			if int(sh.get("dmg", 0)) > 0:
-				sh["dmg"] = maxi(0, int(sh["dmg"]) - GameData.DOCK_REPAIR)
+				var dock := work_level(sh["port"], "dock") if GameData.PORTS.has(sh["port"]) else 0
+				sh["dmg"] = maxi(0, int(sh["dmg"]) - GameData.DOCK_REPAIR * (1 + dock))
 			if sh["owner"] == pid() and sh["route"] != null and GameData.PORTS.has(sh["port"]):
 				_run_route(sh)
 			elif sh["owner"] != pid():
@@ -2256,6 +2346,9 @@ func _monthly() -> void:
 			_crew_monthly()
 			if hq_level() > 0:
 				add_rep(pid(), int(GameData.HQ[hq_level()]["rep"]))
+		var bp_n := benefactor_ports(hid).size()
+		if bp_n > 0:
+			add_rep(hid, GameData.BENEFACTOR_REP * bp_n)
 		if hid == pid() and h["gold"] < 0.0:
 			# automatic emergency loan before a crisis starts
 			var room: float = loan_limit() - h["debt"]
@@ -2404,6 +2497,10 @@ func from_json(text: String) -> bool:
 		battle.rng.seed = int(s["seed"]) + int(s["day"]) * 7
 	for pid in s["ports"]:
 		var p: Dictionary = s["ports"][pid]
+		if not p.has("works"):
+			p["works"] = _new_works()
+		for k in p["works"]["lvl"]:
+			p["works"]["lvl"][k] = int(p["works"]["lvl"][k])
 		for hid in p["friend"]:
 			p["friend"][hid] = int(p["friend"][hid])
 		for hid in p["whcap"]:

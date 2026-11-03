@@ -221,6 +221,9 @@ static func monthly(sim: Sim, hid: String) -> void:
 							break
 					if done:
 						break
+		# a rich house puts money into the cities it cares about (round 14)
+		if spare > (30000.0 if style == "industry" else 50000.0) and sim.rng.randf() < 0.5:
+			_fund_works(sim, hid, spare)
 	# Keep enough for the next lighthouse stage before expanding.
 	if ships.size() < sim.max_ships(hid) and h["gold"] > sim.ship_price("galleon", hid) + WORKING_CAPITAL * (1.0 if style == "ships" else 2.0):
 		var home: String = GameData.HOUSES[hid]["home"]
@@ -234,3 +237,29 @@ static func monthly(sim: Sim, hid: String) -> void:
 				h["gold"] += float(GameData.SHIPS[sh["type"]]["price"]) * 0.6
 				sim.s["ships"].erase(sh)
 				break
+
+
+## Fund the cheapest unfinished work in the home city, or in a city where the house is patron
+## or already the benefactor, keeping its spare cash positive.
+static func _fund_works(sim: Sim, hid: String, spare: float) -> void:
+	var cands := [GameData.HOUSES[hid]["home"]]
+	for port in sim.open_ports():
+		if port in cands:
+			continue
+		if sim.patron(port) == hid or sim.benefactor(port) == hid:
+			cands.append(port)
+	var best_port := ""
+	var best_k := ""
+	var best_cost := INF
+	for port in cands:
+		for k in GameData.WORK_IDS:
+			var lvl := sim.work_level(port, k)
+			if lvl >= GameData.WORK_MAX:
+				continue
+			var cost := float(GameData.WORK_COST[lvl + 1])
+			if cost < best_cost and cost < spare * 0.6:
+				best_cost = cost
+				best_port = port
+				best_k = k
+	if best_port != "":
+		sim.fund_work(best_port, best_k, hid)

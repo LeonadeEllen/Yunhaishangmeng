@@ -219,6 +219,7 @@ func _show_help() -> void:
 		"· 对手：灯油行会靠跑商、铁誓舰团靠船队（船便宜、航速快）、白塔议士靠产业（工坊便宜、产地多产）。云盗对谁都下手，对手的船也会被劫。",
 		"· 相遇：旗舰停进对手船所在的港口时，对手的当家可能来打招呼：和韦朔赛船赌金、和殷望舒当众论道赌名声、向他们买地契和图纸、买通港务拖住他们的船，或者只是喝一杯。伙伴之间好感够高也会在港口发生他们自己的故事，进城时还能在街上碰到他们。",
 		"· 会馆：在老家的商馆页扩建商会总部（三级）：伙伴上限、每月名声、伙伴薪水折扣，最高一级船队上限 +1。",
+		"· 城建：在任何城主府出资修码头（补给更省、修船更快）、集市（行情恢复更快）、学堂（本城工坊增产），每项三级，全城受益。出资最多的商会是本城恩主：买货更便宜、每月得名声、城中立像。对手有钱时也会出资来争。",
 		"· 灯塔：三层灯塔是云海盟主的象征，不建也可以一直玩下去。金币为负超过 30 天会破产。",
 	], [["明白了", func(): _close_modal()]])
 
@@ -1086,6 +1087,9 @@ func _tab_trade(here: bool) -> void:
 	info.add_theme_constant_override("separation", 12)
 	var pat := sim.patron(_port)
 	info.add_child(UiKit.label("港主 " + (GameData.HOUSES[pat]["name"] if pat != "" else "无"), 13, UiKit.BRASS if pat == hid else UiKit.MUTED))
+	var ben := sim.benefactor(_port)
+	if ben != "":
+		info.add_child(UiKit.label("恩主 " + GameData.HOUSES[ben]["name"], 13, UiKit.BRASS if ben == hid else UiKit.MUTED))
 	info.add_child(UiKit.label("友好 " + GameData.FRIEND_NAMES[sim.friend_level(_port)], 13, UiKit.MUTED))
 	if here:
 		var nfl := sim.fleet_ships(fl).size()
@@ -1466,6 +1470,47 @@ func _tab_hall() -> void:
 	var db := UiKit.button("捐助城市 · %s 金 · 友好度 +%d" % [UiKit.money(GameData.DONATION), GameData.DONATION_FRIEND], func(): _act(sim.donate(_port)), true)
 	db.disabled = sim.house()["gold"] < GameData.DONATION
 	side_body.add_child(db)
+	side_body.add_child(HSeparator.new())
+	# city works (round 14)
+	var ben := sim.benefactor(_port)
+	var spent: Dictionary = sim.works(_port)["spent"]
+	var mine := float(spent.get(hid, 0.0))
+	var hd := HBoxContainer.new()
+	var hl := UiKit.label("城建 · 恩主：%s" % (GameData.HOUSES[ben]["name"] if ben != "" else "暂无"), 16, UiKit.BRASS if ben == hid else UiKit.INK, true)
+	hl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hd.add_child(hl)
+	hd.add_child(UiKit.label("你已出资 %s" % UiKit.money(mine), 12, UiKit.MUTED))
+	side_body.add_child(hd)
+	var lead := 0.0
+	for o in spent:
+		if o != hid:
+			lead = maxf(lead, float(spent[o]))
+	side_body.add_child(UiKit.para("出资最多的商会是本城恩主：在此买货 −%d%%，友好度随每级大涨，每月名声 +%d，城中立像。%s" % [int(roundf((1.0 - GameData.BENEFACTOR_DISCOUNT) * 100.0)), GameData.BENEFACTOR_REP, ("对手最多出了 %s。" % UiKit.money(lead)) if lead > 0.0 else "还没人出过钱。"], 12, UiKit.MUTED))
+	for k in GameData.WORK_IDS:
+		var w: Dictionary = GameData.WORKS[k]
+		var wl := sim.work_level(_port, k)
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 6)
+		var pips := ""
+		for i in GameData.WORK_MAX:
+			pips += "●" if i < wl else "○"
+		var col := VBoxContainer.new()
+		col.add_theme_constant_override("separation", 0)
+		col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		col.add_child(UiKit.label("%s %s" % [w["name"], pips], 14, UiKit.INK, true))
+		col.add_child(UiKit.label(w["desc"], 12, UiKit.MUTED))
+		row.add_child(col)
+		if wl >= GameData.WORK_MAX:
+			row.add_child(UiKit.label("已满级", 13, UiKit.UP, true))
+		else:
+			var kk: String = k
+			var ok := sim.work_ok(_port, k)
+			var b := UiKit.button("出资 %s" % UiKit.money(GameData.WORK_COST[wl + 1]), func(): _act(sim.fund_work(_port, kk)))
+			b.disabled = not ok["ok"]
+			b.tooltip_text = ok.get("msg", "升到 %d 级" % (wl + 1))
+			b.add_theme_font_size_override("font_size", 13)
+			row.add_child(b)
+		side_body.add_child(row)
 	side_body.add_child(HSeparator.new())
 	side_body.add_child(UiKit.label("地契 · 本城天然出产", 16, UiKit.INK, true))
 	for g in p["make"]:
@@ -2354,6 +2399,8 @@ func _show_rival(hid: String) -> void:
 		if sim.patron(port) == hid:
 			pats.append(GameData.port_name(port))
 	lines.append("港主：%s" % ("、".join(pats) if not pats.is_empty() else "暂无"))
+	var bens := sim.benefactor_ports(hid).map(func(pp): return GameData.port_name(pp))
+	lines.append("恩主：%s" % ("、".join(bens) if not bens.is_empty() else "暂无"))
 	var bps := []
 	for g in h["bp"]:
 		bps.append(GameData.good_name(g))

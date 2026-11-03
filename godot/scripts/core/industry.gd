@@ -50,6 +50,9 @@ static func output(sim: Sim, pid: String, pl: Dictionary) -> int:
 		n += 1
 	if pl["owner"] == sim.pid():
 		n = int(roundf(float(n) * (1.0 + 0.15 * sim.spec_bonus("forge"))))
+	var school := sim.work_level(pid, "school")
+	if school > 0:
+		n = int(roundf(float(n) * (1.0 + 0.1 * float(school))))
 	return n
 
 

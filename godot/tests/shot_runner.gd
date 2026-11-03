@@ -283,6 +283,19 @@ func run(m: Control) -> void:
 	await _shot("24_pair_scene")
 	main._choose_event(0)
 	main._close_modal()
+	# round 14: city works and the benefactor's statue
+	main.sim.house()["gold"] = 120000.0
+	main.sim.fund_work("qianqi", "dock")
+	main.sim.fund_work("qianqi", "market")
+	main.sim.house("tower")["gold"] = 100000.0
+	main.sim.fund_work("qianqi", "school", "tower")
+	main._open_port("qianqi", 3)
+	await _wait(0.4)
+	await _shot("25_city_works")
+	main._enter_town()
+	await _wait(0.6)
+	await _shot("26_town_statue")
+	main._leave_town()
 	main.sim.s["crown"] = {"hid": main.sim.pid(), "day": main.sim.s["day"]}
 	main._crown_celebration()
 	await _wait(0.4)

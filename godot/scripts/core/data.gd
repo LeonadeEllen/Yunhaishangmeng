@@ -275,6 +275,19 @@ const RIVAL_MEET := 0.45            # chance of a rival captain hailing you when
 const RIVAL_MEET_GAP := 45          # days between such meetings
 const RIVAL_DELAY_COST := 1200
 const RIVAL_DELAY_DAYS := 6
+
+# city works (round 14): any house may fund the next level; the biggest funder is the city's benefactor
+const WORKS := {
+	"dock": {"name": "码头", "desc": "从本城出航的补给每级 −10%，停泊的船每级修得快一倍"},
+	"market": {"name": "集市", "desc": "本城行情每级恢复快 30%：能多卖些货而不把价压垮"},
+	"school": {"name": "学堂", "desc": "本城所有工坊产量每级 +10%"},
+}
+const WORK_IDS := ["dock", "market", "school"]
+const WORK_COST := [0, 10000, 25000, 60000]
+const WORK_MAX := 3
+const WORK_REP := 2                  # reputation level needed to fund city works
+const BENEFACTOR_DISCOUNT := 0.97    # the benefactor buys cheaper here
+const BENEFACTOR_REP := 10           # monthly reputation per city
 const PLAYER := "lamp"
 
 # ------------------------------------------------------------------ protagonist

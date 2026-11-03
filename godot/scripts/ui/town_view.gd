@@ -328,6 +328,18 @@ func _draw() -> void:
 		draw_circle(tp + Vector2(3, 4), tr, Color(0, 0, 0, 0.12))
 		draw_circle(tp, tr, [Color(0.45, 0.6, 0.42), Color(0.55, 0.66, 0.4), Color(0.4, 0.56, 0.5)][int(t["k"])])
 		draw_circle(tp + Vector2(-tr * 0.3, -tr * 0.3), tr * 0.45, Color(1, 1, 1, 0.18))
+	# the benefactor's statue on the plaza (round 14)
+	var ben := sim.benefactor(port)
+	if ben != "":
+		var bc: Color = GameData.HOUSES[ben]["color"]
+		draw_ellipse_shadow(plaza + Vector2(0, 14), Vector2(26, 9))
+		draw_rect(Rect2(plaza + Vector2(-20, -6), Vector2(40, 18)), Color(0.78, 0.72, 0.6))
+		draw_rect(Rect2(plaza + Vector2(-20, -6), Vector2(40, 18)), Color(0.45, 0.38, 0.28, 0.8), false, 1.0)
+		_draw_person(plaza + Vector2(0, -6), bc.lightened(0.15), Color(0.72, 0.7, 0.62), false, 1.0)
+		var sn := "恩主 · %s" % GameData.HOUSES[ben]["name"]
+		var sw := font.get_string_size(sn, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
+		draw_rect(Rect2(plaza + Vector2(-sw * 0.5 - 5, 16), Vector2(sw + 10, 17)), Color(bc, 0.92))
+		draw_string(font, plaza + Vector2(-sw * 0.5, 29), sn, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color.WHITE)
 	# depth-sorted actors
 	var items := []
 	for b in _buildings:

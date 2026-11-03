@@ -227,6 +227,13 @@ func _draw() -> void:
 		if pat != "":
 			# patron: a coloured band under the name plate
 			draw_rect(Rect2(plate.position + Vector2(4, plate.size.y - 3), Vector2(plate.size.x - 8, 3)), GameData.HOUSES[pat]["color"])
+		var ben := sim.benefactor(pid)
+		if ben != "":
+			# benefactor: a small diamond at the left of the plate
+			var bc := plate.position + Vector2(-3, plate.size.y * 0.5)
+			var rr := 6.0 * maxf(sc, 0.8)
+			draw_colored_polygon(PackedVector2Array([bc + Vector2(0, -rr), bc + Vector2(rr, 0), bc + Vector2(0, rr), bc + Vector2(-rr, 0)]), GameData.HOUSES[ben]["color"])
+			draw_polyline(PackedVector2Array([bc + Vector2(0, -rr), bc + Vector2(rr, 0), bc + Vector2(0, rr), bc + Vector2(-rr, 0), bc + Vector2(0, -rr)]), Color(1, 1, 1, 0.8), 1.0)
 		var cs := sim.open_contracts(pid)
 		if not cs.is_empty():
 			# contract notice pinned above the island
