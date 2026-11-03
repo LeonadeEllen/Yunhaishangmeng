@@ -13,6 +13,8 @@ func _init() -> void:
 	test_contracts_and_buyout()
 	test_production_chain()
 	test_hero()
+	test_fleet_and_refit()
+	test_multi_stop_route()
 	var seeds := [11, 22, 33, 44, 55]
 	var crowns := 0
 	var bot_stage := 0
@@ -153,6 +155,72 @@ func test_hero() -> void:
 	check(sim.docked(fl) and hero_visited(sim, "chishi"), "arriving logs the visit and grants experience (exp %d)" % int(sim.hero()["exp"]))
 	var sim2 := Sim.new()
 	check(sim2.from_json(sim.to_json()) and sim2.hero_abil("sail") == 6 and int(sim2.hero()["lvl"]) == 2, "hero survives save/load")
+
+
+func test_fleet_and_refit() -> void:
+	print("fleet & refit")
+	var sim := Sim.new()
+	sim.new_game(8)
+	sim.house()["gold"] = 200000.0
+	var fl := sim.flagship()
+	var home: String = fl["port"]
+	var r := sim.buy_ship("freighter", home)
+	check(r["ok"], "second ship bought")
+	var esc := sim.ship(int(r["ship"]))
+	check(sim.join_fleet(esc["id"])["ok"] and sim.fleet_ships(fl).size() == 2, "escort joins the flagship's fleet")
+	check(sim.fleet_cargo_cap(fl) == sim.cargo_cap(fl) + sim.cargo_cap(esc), "fleet capacity is the sum of holds")
+	var g: String = GameData.PORTS[home]["make"][0]
+	sim.s["ports"][home]["market"][g]["stock"] = 2000.0
+	check(sim.buy(fl["id"], g, 120)["ok"] and sim.fleet_cargo_used(fl) == 120 and sim.cargo_used(esc) > 0, "buying on the flagship spills into the escort")
+	check(not sim.depart(esc["id"], "chishi")["ok"], "an escort cannot sail on its own")
+	var d := sim.depart(fl["id"], "chishi")
+	check(d["ok"] and not sim.docked(esc) and esc["arrive"] == fl["arrive"], "the fleet sails together")
+	for i in 40:
+		if sim.s["event"] != null:
+			EventBook.resolve(sim, 0)
+		sim.advance_day()
+	check(sim.docked(fl) and fl["port"] == "chishi" and esc["port"] == "chishi", "fleet arrives together")
+	check(sim.sell(fl["id"], g, 120)["ok"] and sim.fleet_cargo_used(fl) == 0, "selling empties every hold in the fleet")
+	check(not sim.set_route(esc["id"], {"a": "chishi", "b": "qianqi", "good": "stone"})["ok"], "an escort refuses an auto route")
+	# refit: canvas from the market
+	var cap0 := sim.cargo_cap(fl)
+	var days0 := sim.ship_days(fl, "qianqi")
+	sim.s["ports"]["chishi"]["market"]["canvas"]["stock"] = 500.0
+	var plan := sim.refit_plan(fl, "sail")
+	check(plan["ok"] and int(plan["gold"]) > int(plan["fee"]), "refit plan buys the missing canvas at the market")
+	check(sim.refit(fl["id"], "sail")["ok"] and sim.mod_lvl(fl, "sail") == 1, "sails refitted")
+	check(sim.speed_mult(fl) > 1.0 and sim.ship_days(fl, "qianqi") <= days0, "new sails make the ship faster")
+	sim.s["ports"]["chishi"]["market"]["steel"]["stock"] = 500.0
+	check(sim.refit(fl["id"], "hold")["ok"] and sim.cargo_cap(fl) > cap0, "hold extension adds capacity")
+	sim.s["ports"]["chishi"]["market"]["cannon"]["stock"] = 0.0
+	check(not sim.refit(fl["id"], "guns")["ok"], "no cannons on sale means no guns")
+	check(sim.rename_ship(fl["id"], "青鸾号")["ok"] and fl["name"] == "青鸾号", "ship renamed")
+	check(sim.set_slot(esc["id"], "van")["ok"] and esc["slot"] == "van", "escort takes the vanguard slot")
+	var sim2 := Sim.new()
+	check(sim2.from_json(sim.to_json()) and sim2.mod_lvl(sim2.flagship(), "sail") == 1 and sim2.fleet_ships(sim2.flagship()).size() == 2, "refits and fleets survive save/load")
+
+
+func test_multi_stop_route() -> void:
+	print("multi-stop route")
+	var sim := Sim.new()
+	sim.new_game(8)
+	sim.house()["gold"] = 100000.0
+	var r := sim.buy_ship("freighter", "qianqi")
+	var sh := sim.ship(int(r["ship"]))
+	check(not sim.set_route(sh["id"], {"stops": [{"port": "qianqi", "buy": []}, {"port": "muxia", "buy": []}]})["ok"], "a route with nothing to buy is refused")
+	check(not sim.set_route(sh["id"], {"stops": [{"port": "qianqi", "buy": ["silk"]}, {"port": "qianqi", "buy": []}]})["ok"], "adjacent identical stops are refused")
+	var ok := sim.set_route(sh["id"], {"stops": [{"port": "qianqi", "buy": ["silk"]}, {"port": "muxia", "buy": ["fish"]}, {"port": "chishi", "buy": ["stone"]}]})
+	check(ok["ok"] and sh["route"]["stops"].size() == 3, "three-stop route accepted")
+	var visited := {}
+	for i in 200:
+		if sim.s["event"] != null:
+			EventBook.resolve(sim, 0)
+		sim.advance_day()
+		visited[sh["port"] if sim.docked(sh) else sh["to"]] = true
+	check(visited.has("muxia") and visited.has("chishi") and visited.has("qianqi"), "the ship works its way around the loop")
+	check(int(sh["route"].get("total", 0)) != 0, "the loop books some profit or loss (%d)" % int(sh["route"].get("total", 0)))
+	var legacy := sim.set_route(sh["id"], {"a": "qianqi", "b": "muxia", "good": "silk"})
+	check(legacy["ok"] and sh["route"]["stops"].size() == 2 and sh["route"]["stops"][0]["buy"] == ["silk"], "old two-port routes convert")
 
 
 func hero_visited(sim: Sim, port: String) -> bool:

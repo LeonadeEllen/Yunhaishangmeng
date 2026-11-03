@@ -544,38 +544,62 @@ func _refresh_fleet() -> void:
 	var head := HBoxContainer.new()
 	head.add_child(UiKit.label("船队 %d/%d" % [sim.ships_of().size(), sim.max_ships()], 18, UiKit.INK, true))
 	fleet_box.add_child(head)
+	var fl := sim.flagship()
+	var ordered := sim.fleet_ships(fl)
 	for sh in sim.ships_of():
+		if not sh in ordered:
+			ordered.append(sh)
+	for sh in ordered:
 		var row := HBoxContainer.new()
-		row.add_child(UiKit.icon(UiKit.sprite("ships", GameData.SHIPS[sh["type"]]["sprite"]), 40))
+		var esc := sim.in_fleet(sh)
+		if esc:
+			var pad := Control.new()
+			pad.custom_minimum_size = Vector2(14, 0)
+			row.add_child(pad)
+		row.add_child(UiKit.icon(UiKit.sprite("ships", GameData.SHIPS[sh["type"]]["sprite"]), 40 if not esc else 32))
 		var v := VBoxContainer.new()
 		v.add_theme_constant_override("separation", 0)
 		v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		var title := "%s%s · %s" % ["★ " if sh["flagship"] else "", sh["name"], GameData.SHIPS[sh["type"]]["name"]]
-		v.add_child(UiKit.label(title, 16, UiKit.INK, true))
+		var title := "%s%s · %s%s" % ["★ " if sh["flagship"] else ("↳ " if esc else ""), sh["name"], GameData.SHIPS[sh["type"]]["name"], (" · " + GameData.SLOTS[sh.get("slot", "main")]) if esc else ""]
+		v.add_child(UiKit.label(title, 16 if not esc else 14, UiKit.INK, true))
 		var st := ""
 		if sim.docked(sh):
 			st = "停靠 %s" % GameData.port_name(sh["port"])
 		else:
 			st = "前往 %s · 剩 %d 天" % [GameData.port_name(sh["to"]), maxi(0, int(sh["arrive"]) - int(sim.s["day"]))]
-		st += " · 货 %d/%d" % [sim.cargo_used(sh), sim.cargo_cap(sh)]
-		v.add_child(UiKit.label(st, 14, UiKit.MUTED))
+		if sh["flagship"] and ordered.size() > 1 and sim.fleet_ships(fl).size() > 1:
+			st += " · 船队货 %d/%d" % [sim.fleet_cargo_used(fl), sim.fleet_cargo_cap(fl)]
+		else:
+			st += " · 货 %d/%d" % [sim.cargo_used(sh), sim.cargo_cap(sh)]
+		v.add_child(UiKit.label(st, 14 if not esc else 12, UiKit.MUTED))
 		if sh["route"] != null:
 			var r: Dictionary = sh["route"]
-			var rt := "航线 %s ⇄ %s · %s" % [GameData.port_name(r["a"]), GameData.port_name(r["b"]), GameData.good_name(r["good"])]
+			var rt := "航线 " + Sim.route_text(r)
 			if r.has("total"):
 				rt += " · 累计 %+s" % UiKit.money(r["total"])
 			if r.has("stalled"):
 				rt += " · 停滞：" + r["stalled"]
-			v.add_child(UiKit.label(rt, 13, UiKit.JADE))
+			var rl := UiKit.label(rt, 13, UiKit.JADE)
+			rl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			v.add_child(rl)
 		row.add_child(v)
 		var id: int = sh["id"]
-		if not sh["flagship"]:
+		if sh["flagship"]:
+			if sim.docked(sh):
+				row.add_child(UiKit.button("查看", func(): _open_port(sh["port"], 0), true))
+		elif esc:
+			var lb := UiKit.button("脱队", func(): _act(sim.leave_fleet(id)); _refresh_fleet(); _refresh_side(), true)
+			lb.disabled = not sim.docked(sh)
+			row.add_child(lb)
+		else:
+			if not fl.is_empty() and sim.docked(fl) and sim.docked(sh) and sh["port"] == fl["port"] and sh["route"] == null:
+				var jb := UiKit.button("随行", func(): _act(sim.join_fleet(id)); _refresh_fleet(); _refresh_side(), true)
+				jb.tooltip_text = "编入旗舰队：跟旗舰一起航行，货舱合并使用。"
+				row.add_child(jb)
 			var rb := UiKit.button("航线", func(): _show_route_dialog(id), true)
 			if _tut_step() == 4 and sh["route"] == null:
 				_pulse(rb)
 			row.add_child(rb)
-		elif sim.docked(sh):
-			row.add_child(UiKit.button("查看", func(): _open_port(sh["port"], 0), true))
 		fleet_box.add_child(row)
 
 
@@ -592,7 +616,7 @@ func _on_port_hovered(pid: String) -> void:
 	v.add_child(UiKit.label(GameData.port_name(pid), 18, UiKit.INK, true))
 	var fl := sim.flagship()
 	if not fl.is_empty() and sim.docked(fl) and fl["port"] != pid:
-		v.add_child(UiKit.label("旗舰前往：%d 天 · 补给 %d 金" % [sim.travel_days(fl["port"], pid, fl["type"]), sim.fuel_cost_for(fl, pid)], 14, UiKit.JADE, true))
+		v.add_child(UiKit.label("旗舰前往：%d 天 · 补给 %d 金" % [sim.ship_days(fl, pid), sim.fuel_cost_for(fl, pid)], 14, UiKit.JADE, true))
 	for c in sim.open_contracts(pid):
 		v.add_child(UiKit.label("委托：%s %d 件 → %s 金（剩 %d 天）" % [GameData.good_name(c["good"]), int(c["qty"]), UiKit.money(c["reward"]), int(c["end"]) - int(sim.s["day"])], 14, UiKit.BRASS, true))
 	var it = sim.s["intel"][pid]
@@ -600,17 +624,16 @@ func _on_port_hovered(pid: String) -> void:
 		v.add_child(UiKit.label("尚无行情", 14, UiKit.MUTED))
 	else:
 		v.add_child(UiKit.label("行情 %d 天前" % (int(sim.s["day"]) - int(it["day"])), 13, UiKit.MUTED))
-		var goods: Array = []
-		if not fl.is_empty():
-			goods = fl["cargo"].keys()
+		var fc := sim.fleet_cargo(fl) if not fl.is_empty() else {}
+		var goods: Array = fc.keys()
 		for g in GameData.PORTS[pid]["want"]:
 			if not g in goods:
 				goods.append(g)
 		for g in goods:
 			var line := "%s 卖 %d" % [GameData.good_name(g), int(it["prices"][g][1])]
-			if not fl.is_empty() and fl["cargo"].has(g):
-				var m := int(it["prices"][g][1]) - int(fl["cargo"][g]["cost"])
-				line += "（货舱 %d 件，每件 %+d）" % [int(fl["cargo"][g]["qty"]), m]
+			if fc.has(g):
+				var m := int(it["prices"][g][1]) - int(fc[g]["cost"])
+				line += "（货舱 %d 件，每件 %+d）" % [int(fc[g]["qty"]), m]
 			v.add_child(UiKit.label(line, 14, UiKit.INK))
 	hover_card.visible = true
 	hover_card.reset_size()
@@ -711,7 +734,7 @@ func _refresh_side() -> void:
 		if _in_town and _town_kind != "":
 			side_body.add_child(_interior_strip(_town_kind))
 	if not fl.is_empty() and sim.docked(fl) and not here:
-		var days := sim.travel_days(fl["port"], _port, fl["type"])
+		var days := sim.ship_days(fl, _port)
 		var fc := sim.fuel_cost_for(fl, _port)
 		var go := UiKit.button("旗舰起航前往此港 · %d 天 · 补给 %d 金" % [days, fc], func(): _sail(_port))
 		if _tut_step() == 1 and _port == _tutorial_goal()["dest"]:
@@ -893,7 +916,8 @@ func _tab_trade(here: bool) -> void:
 	info.add_child(UiKit.label("港主 " + (GameData.HOUSES[pat]["name"] if pat != "" else "无"), 13, UiKit.BRASS if pat == hid else UiKit.MUTED))
 	info.add_child(UiKit.label("友好 " + GameData.FRIEND_NAMES[sim.friend_level(_port)], 13, UiKit.MUTED))
 	if here:
-		info.add_child(UiKit.label("货舱 %d / %d" % [sim.cargo_used(fl), sim.cargo_cap(fl)], 13, UiKit.INK, true))
+		var nfl := sim.fleet_ships(fl).size()
+		info.add_child(UiKit.label("货舱 %d / %d%s" % [sim.fleet_cargo_used(fl), sim.fleet_cargo_cap(fl), ("（%d 艘）" % nfl) if nfl > 1 else ""], 13, UiKit.INK, true))
 	else:
 		info.add_child(UiKit.label("行情 %d 天前 · 旗舰不在此港" % (int(sim.s["day"]) - int(intel["day"])), 13, UiKit.MUTED))
 	if has_post:
@@ -942,6 +966,7 @@ func _tab_trade(here: bool) -> void:
 		if not g in order:
 			order.append(g)
 	var wh := Industry.wh(sim, _port, hid) if has_post else {}
+	var fcargo := sim.fleet_cargo(fl) if not fl.is_empty() else {}
 	for g in order:
 		var t := GameData.tier(g)
 		var gh := HBoxContainer.new()
@@ -986,9 +1011,9 @@ func _tab_trade(here: bool) -> void:
 		grid.add_child(sl)
 		var held := 0
 		var avg := 0.0
-		if not fl.is_empty() and fl["cargo"].has(g):
-			held = int(fl["cargo"][g]["qty"])
-			avg = float(fl["cargo"][g]["cost"])
+		if fcargo.has(g):
+			held = int(fcargo[g]["qty"])
+			avg = float(fcargo[g]["cost"])
 		var in_wh := int(wh.get(g, 0))
 		var al := UiKit.label(str(int(avg)) if held > 0 else "—", 13, UiKit.UP if held > 0 and spr > avg else UiKit.MUTED)
 		if held > 0:
@@ -1009,13 +1034,13 @@ func _tab_trade(here: bool) -> void:
 			b_out.tooltip_text = ["从船上卖出", "从商馆卖出", "从船上卸进商馆"][_trade_mode]
 			match _trade_mode:
 				0:
-					b_in.disabled = sim.cargo_used(fl) >= sim.cargo_cap(fl) or sim.house()["gold"] < bp or stock <= 0
+					b_in.disabled = sim.fleet_cargo_used(fl) >= sim.fleet_cargo_cap(fl) or sim.house()["gold"] < bp or stock <= 0
 					b_out.disabled = held == 0
 				1:
 					b_in.disabled = Industry.wh_used(sim, _port, hid) >= Industry.wh_cap(sim, _port, hid) or sim.house()["gold"] < bp or stock <= 0
 					b_out.disabled = in_wh == 0
 				2:
-					b_in.disabled = in_wh == 0 or sim.cargo_used(fl) >= sim.cargo_cap(fl)
+					b_in.disabled = in_wh == 0 or sim.fleet_cargo_used(fl) >= sim.fleet_cargo_cap(fl)
 					b_out.disabled = held == 0 or Industry.wh_used(sim, _port, hid) >= Industry.wh_cap(sim, _port, hid)
 			if _tut_step() == 0 and gg == _tutorial_goal()["good"] and _trade_mode == 0:
 				_pulse(b_in)
@@ -1062,17 +1087,13 @@ func _tab_yard(here: bool) -> void:
 		b.disabled = sim.house()["gold"] < sim.ship_price(t) or sim.ships_of().size() >= sim.max_ships()
 		row.add_child(b)
 		side_body.add_child(row)
-	var mine := sim.ships_of().filter(func(x): return sim.docked(x) and x["port"] == _port and not x["flagship"])
+	var mine := sim.ships_of().filter(func(x): return sim.docked(x) and x["port"] == _port)
 	if not mine.is_empty():
 		side_body.add_child(HSeparator.new())
+		side_body.add_child(UiKit.label("停在此港的船 · 改造与编队", 16, UiKit.INK, true))
+		side_body.add_child(UiKit.para("改造在船坞做，每项最高 3 级。物料先用船上的，再用商馆里的，不够就按市价买。", 13, UiKit.MUTED))
 		for sh in mine:
-			var id: int = sh["id"]
-			var r2 := HBoxContainer.new()
-			var l := UiKit.label("%s（%s）· 回收 %s 金" % [sh["name"], GameData.SHIPS[sh["type"]]["name"], UiKit.money(GameData.SHIPS[sh["type"]]["price"] * 0.6)], 15)
-			l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			r2.add_child(l)
-			r2.add_child(UiKit.button("出售", func(): _act(sim.sell_ship(id)); _refresh_fleet(), true))
-			side_body.add_child(r2)
+			side_body.add_child(_ship_card(sh))
 
 
 func _tab_post(here: bool) -> void:
@@ -1591,15 +1612,12 @@ func _choose_event(idx: int) -> void:
 		_show_event()
 
 
-func _confirm_route(ship_id: int, og: OptionButton, oa: OptionButton, ob: OptionButton) -> void:
-	var a: String = GameData.PORT_IDS[oa.selected]
-	var b: String = GameData.PORT_IDS[ob.selected]
-	if a == b:
-		_toast("A 港和 B 港不能相同。", "bad")
-		return
-	_act(sim.set_route(ship_id, {"a": a, "b": b, "good": GameData.GOOD_IDS[og.selected]}))
-	_close_modal()
-	_refresh_fleet()
+func _confirm_route(ship_id: int, stops: Array) -> void:
+	var res := sim.set_route(ship_id, {"stops": stops})
+	_act(res)
+	if res["ok"]:
+		_close_modal()
+		_refresh_fleet()
 
 
 func _lighthouse_cutscene(stage: int) -> void:
@@ -1636,61 +1654,166 @@ func _crown_celebration() -> void:
 		sim.add_friend(port, sim.pid(), 300)
 
 
+func _ship_card(sh: Dictionary) -> Control:
+	var id: int = sh["id"]
+	var box := PanelContainer.new()
+	box.add_theme_stylebox_override("panel", UiKit.box(Color("faf3e3"), Color(UiKit.BRASS, 0.5), 6, 1, 8))
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 4)
+	box.add_child(v)
+	var hd := HBoxContainer.new()
+	hd.add_theme_constant_override("separation", 8)
+	hd.add_child(UiKit.icon(UiKit.sprite("ships", GameData.SHIPS[sh["type"]]["sprite"]), 44))
+	var tv := VBoxContainer.new()
+	tv.add_theme_constant_override("separation", 0)
+	tv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	tv.add_child(UiKit.label("%s%s · %s" % ["★ " if sh["flagship"] else "", sh["name"], GameData.SHIPS[sh["type"]]["name"]], 16, UiKit.INK, true))
+	tv.add_child(UiKit.label("货舱 %d · 航速 ×%.2f · 炮位 %d · 耐久 +%d%%" % [sim.cargo_cap(sh), sim.speed_mult(sh), sim.mod_lvl(sh, "guns") * 2, sim.mod_lvl(sh, "hull") * 20], 12, UiKit.MUTED))
+	hd.add_child(tv)
+	var name_edit := LineEdit.new()
+	name_edit.text = sh["name"]
+	name_edit.max_length = 8
+	name_edit.custom_minimum_size = Vector2(84, 0)
+	name_edit.tooltip_text = "改名后按回车（最多 8 字）"
+	name_edit.text_submitted.connect(func(t): _act(sim.rename_ship(id, t)); _refresh_fleet(); _refresh_side())
+	hd.add_child(name_edit)
+	if sim.in_fleet(sh):
+		var ob := OptionButton.new()
+		var keys := GameData.SLOTS.keys()
+		for k in keys:
+			ob.add_item(GameData.SLOTS[k])
+		ob.select(keys.find(sh.get("slot", "main")))
+		ob.item_selected.connect(func(i): _act(sim.set_slot(id, keys[i])); _refresh_fleet())
+		ob.tooltip_text = "编队位置：影响空战的开局站位（第 8 轮）"
+		hd.add_child(ob)
+	if not sh["flagship"]:
+		var sb := UiKit.button("出售", func(): _act(sim.sell_ship(id)); _refresh_fleet(); _refresh_side(), true)
+		sb.add_theme_font_size_override("font_size", 12)
+		sb.tooltip_text = "卖掉这艘船，得 %s 金（船价六成）；船上的货会一并处理掉" % UiKit.money(GameData.SHIPS[sh["type"]]["price"] * 0.6)
+		hd.add_child(sb)
+	v.add_child(hd)
+	var grid := GridContainer.new()
+	grid.columns = 4
+	grid.add_theme_constant_override("h_separation", 8)
+	grid.add_theme_constant_override("v_separation", 2)
+	for k in GameData.REFITS:
+		var r: Dictionary = GameData.REFITS[k]
+		var lvl := sim.mod_lvl(sh, k)
+		grid.add_child(UiKit.label("%s %d/%d" % [r["name"], lvl, GameData.REFIT_MAX], 13, UiKit.INK, true))
+		var dl := UiKit.label(r["desc"], 12, UiKit.MUTED)
+		dl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		dl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		dl.custom_minimum_size = Vector2(120, 0)
+		grid.add_child(dl)
+		if lvl >= GameData.REFIT_MAX:
+			grid.add_child(UiKit.label("满级", 12, UiKit.UP, true))
+			grid.add_child(Control.new())
+			continue
+		var plan := sim.refit_plan(sh, k)
+		var need := sim.refit_cost(sh, k)
+		var mats := []
+		for g in need["mats"]:
+			mats.append("%s×%d" % [GameData.good_name(g), int(need["mats"][g])])
+		var ml := UiKit.label("、".join(mats), 12, UiKit.INK if plan["ok"] else UiKit.TERRA)
+		ml.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		ml.custom_minimum_size = Vector2(96, 0)
+		grid.add_child(ml)
+		var kk: String = k
+		var b := UiKit.button("%s 金" % UiKit.money(plan["gold"]), func(): _act(sim.refit(id, kk)); _refresh_fleet(); _refresh_side(), true)
+		b.add_theme_font_size_override("font_size", 12)
+		b.disabled = not plan["ok"] or sim.house()["gold"] < plan["gold"]
+		var src := []
+		for pt in plan["parts"]:
+			src.append("%s：船上 %d · 商馆 %d · 市场 %d%s" % [GameData.good_name(pt["good"]), int(pt["hold"]), int(pt["wh"]), int(pt["mkt"]), ("（缺 %d）" % int(pt["short"])) if int(pt["short"]) > 0 else ""])
+		b.tooltip_text = "工费 %d 金 + 采购 %d 金\n" % [int(plan["fee"]), int(plan["gold"]) - int(plan["fee"])] + "\n".join(src)
+		grid.add_child(b)
+	v.add_child(grid)
+	return box
+
+
 func _show_route_dialog(ship_id: int) -> void:
 	var sh := sim.ship(ship_id)
 	var cur = sh["route"]
-	var v := _modal("自动航线 · %s" % sh["name"], "", ["这艘船会在 A 港买入货物，运到 B 港卖出，然后返回 A 港，循环往复。价格不划算时它会少买或空跑。"], [], 620)
-	var grid := GridContainer.new()
-	grid.columns = 2
-	var og := OptionButton.new()
-	for g in GameData.GOOD_IDS:
-		og.add_item(GameData.good_name(g))
-	var oa := OptionButton.new()
-	var ob := OptionButton.new()
-	for pid in GameData.PORT_IDS:
-		oa.add_item(GameData.port_name(pid))
-		ob.add_item(GameData.port_name(pid))
+	var v := _modal("自动航线 · %s" % sh["name"], "", ["船会沿着这些站循环：每到一站卖掉船上不在该站采购单里的货，再按采购单装货（价格不划算时少买或空跑）。2–4 站，每站最多买 3 种。"], [], 700)
+	var stops: Array = []
 	if cur != null:
-		og.select(GameData.GOOD_IDS.find(cur["good"]))
-		oa.select(GameData.PORT_IDS.find(cur["a"]))
-		ob.select(GameData.PORT_IDS.find(cur["b"]))
+		for st in Sim.normalize_route(cur)["stops"]:
+			stops.append({"port": st["port"], "buy": st["buy"].duplicate()})
 	else:
-		og.select(GameData.GOOD_IDS.find("silk"))
-		oa.select(GameData.PORT_IDS.find("qianqi"))
-		ob.select(GameData.PORT_IDS.find("muxia"))
-	grid.add_child(UiKit.label("货物", 16))
-	grid.add_child(og)
-	grid.add_child(UiKit.label("买入港 A", 16))
-	grid.add_child(oa)
-	grid.add_child(UiKit.label("卖出港 B", 16))
-	grid.add_child(ob)
-	v.add_child(grid)
-	var est := UiKit.para("", 15, UiKit.JADE)
+		var tg := _tutorial_goal()
+		stops = [{"port": tg["home"], "buy": [tg["good"]]}, {"port": tg["dest"], "buy": []}]
+	var list := VBoxContainer.new()
+	list.add_theme_constant_override("separation", 6)
+	v.add_child(list)
+	v.move_child(list, v.get_child_count() - 2)
+	var est := UiKit.para("", 14, UiKit.JADE)
 	v.add_child(est)
-	var upd := func(_i = 0):
-		var g: String = GameData.GOOD_IDS[og.selected]
-		var a: String = GameData.PORT_IDS[oa.selected]
-		var b: String = GameData.PORT_IDS[ob.selected]
-		var ia = sim.s["intel"][a]
-		var ib = sim.s["intel"][b]
-		if a == b:
-			est.text = "A 港和 B 港不能相同。"
-		elif ia == null or ib == null:
-			est.text = "缺少其中一个港口的行情，无法估算。"
-		else:
-			var margin := int(ib["prices"][g][1]) - int(ia["prices"][g][0])
-			var days := GameData.travel_days(a, b, sh["type"]) * 2
-			est.text = "按已知行情：每件差价 %+d，往返约 %d 天，满载 %d 件。" % [margin, days, sim.cargo_cap(sh)]
-	og.item_selected.connect(upd)
-	oa.item_selected.connect(upd)
-	ob.item_selected.connect(upd)
-	upd.call()
+	v.move_child(est, v.get_child_count() - 2)
+	var rebuild: Callable
+	var update_est := func():
+		var days := 0
+		for i in stops.size():
+			days += GameData.travel_days(stops[i]["port"], stops[(i + 1) % stops.size()]["port"], sh["type"])
+		var hints := []
+		for i in stops.size():
+			for g in stops[i]["buy"]:
+				var ia = sim.s["intel"][stops[i]["port"]]
+				var best := -99999
+				for j in range(1, stops.size()):
+					var o: Dictionary = stops[(i + j) % stops.size()]
+					var io = sim.s["intel"][o["port"]]
+					if io != null and ia != null and not g in o["buy"]:
+						best = maxi(best, int(io["prices"][g][1]) - int(ia["prices"][g][0]))
+				hints.append("%s %s" % [GameData.good_name(g), ("每件 %+d" % best) if best > -99999 else "无行情"])
+		est.text = "一圈约 %d 天 · 满载 %d 件 · 按已知行情：%s" % [days, sim.cargo_cap(sh), "，".join(hints) if not hints.is_empty() else "还没选要买的货"]
+	rebuild = func():
+		UiKit.clear(list)
+		for i in stops.size():
+			var idx: int = i
+			var row := HBoxContainer.new()
+			row.add_theme_constant_override("separation", 6)
+			row.add_child(UiKit.label("第 %d 站" % (i + 1), 14, UiKit.MUTED, true))
+			var op := OptionButton.new()
+			for pid in GameData.PORT_IDS:
+				op.add_item(GameData.port_name(pid))
+			op.select(GameData.PORT_IDS.find(stops[i]["port"]))
+			op.item_selected.connect(func(k): stops[idx]["port"] = GameData.PORT_IDS[k]; update_est.call())
+			row.add_child(op)
+			row.add_child(UiKit.label("买", 14, UiKit.MUTED))
+			for slot in GameData.ROUTE_MAX_BUYS:
+				var og := OptionButton.new()
+				og.add_item("—")
+				for g in GameData.GOOD_IDS:
+					og.add_item(GameData.good_name(g))
+				var cur_g: String = stops[i]["buy"][slot] if slot < stops[i]["buy"].size() else ""
+				og.select(0 if cur_g == "" else GameData.GOOD_IDS.find(cur_g) + 1)
+				var ss: int = slot
+				og.item_selected.connect(func(k):
+					var buys: Array = stops[idx]["buy"]
+					while buys.size() <= ss:
+						buys.append("")
+					buys[ss] = "" if k == 0 else GameData.GOOD_IDS[k - 1]
+					stops[idx]["buy"] = buys.filter(func(x): return x != "")
+					update_est.call())
+				row.add_child(og)
+			var sp := Control.new()
+			sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			row.add_child(sp)
+			var del := UiKit.button("✕", func(): stops.remove_at(idx); rebuild.call(), true)
+			del.disabled = stops.size() <= 2
+			row.add_child(del)
+			list.add_child(row)
+		if stops.size() < GameData.ROUTE_MAX_STOPS:
+			list.add_child(UiKit.button("+ 加一站", func(): stops.append({"port": GameData.PORT_IDS[(GameData.PORT_IDS.find(stops[stops.size() - 1]["port"]) + 1) % GameData.PORT_IDS.size()], "buy": []}); rebuild.call(), true))
+		update_est.call()
+	rebuild.call()
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_END
+	row.add_theme_constant_override("separation", 10)
 	row.add_child(UiKit.button("取消", func(): _close_modal(), true))
 	if cur != null:
 		row.add_child(UiKit.button("清除航线", func(): _act(sim.set_route(ship_id, {})); _close_modal(); _refresh_fleet(), true))
-	row.add_child(UiKit.button("确认航线", _confirm_route.bind(ship_id, og, oa, ob)))
+	row.add_child(UiKit.button("确认航线", func(): _confirm_route(ship_id, stops)))
 	v.add_child(row)
 
 

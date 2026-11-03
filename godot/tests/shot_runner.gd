@@ -91,7 +91,7 @@ func run(m: Control) -> void:
 	main._on_port_hovered("")
 	# mid game: auto route + 150 fast days
 	var sh2: Dictionary = main.sim.ships_of()[main.sim.ships_of().size() - 1]
-	main.sim.set_route(sh2["id"], {"a": "qianqi", "b": "chishi", "good": "silk"})
+	main.sim.set_route(sh2["id"], {"stops": [{"port": "qianqi", "buy": ["silk"]}, {"port": "chishi", "buy": ["stone"]}, {"port": "muxia", "buy": []}]})
 	for i in 150:
 		if main.sim.s["event"] != null:
 			EventBook.resolve(main.sim, 0)
@@ -130,6 +130,19 @@ func run(m: Control) -> void:
 	await _wait(0.3)
 	await _shot("14g_trade_wh_mode")
 	main._trade_mode = 0
+	# fleet + refit
+	main.sim.house()["gold"] += 60000
+	var fp: String = main.sim.flagship()["port"]
+	var r3: Dictionary = main.sim.buy_ship("galleon", fp)
+	main.sim.join_fleet(int(r3["ship"]))
+	main._refresh_fleet()
+	main._open_port(fp, 1)
+	await _wait(0.4)
+	await _shot("14h_yard_refit")
+	main._show_route_dialog(sh2["id"])
+	await _wait(0.4)
+	await _shot("14i_route_dialog")
+	main._close_modal()
 	main.sim.s["crown"] = {"hid": main.sim.pid(), "day": main.sim.s["day"]}
 	main._crown_celebration()
 	await _wait(0.4)

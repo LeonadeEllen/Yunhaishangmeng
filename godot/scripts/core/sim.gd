@@ -107,12 +107,22 @@ func spend_hero_pt(k: String) -> Dictionary:
 
 
 ## Travel time for a house's ship; the protagonist's seamanship shortens the player's voyages.
-func travel_days(from: String, to: String, type: String, hid: String = "") -> int:
+func travel_days(from: String, to: String, type: String, hid: String = "", sh: Dictionary = {}) -> int:
 	if hid == "":
 		hid = pid()
-	var d := GameData.travel_days(from, to, type)
+	var d := float(GameData.travel_days(from, to, type))
+	if not sh.is_empty():
+		d /= speed_mult(sh)
 	if hid == pid():
-		d = maxi(1, int(roundf(float(d) * (1.0 - 0.03 * float(hero_abil("sail") - 1)))))
+		d *= 1.0 - 0.03 * float(hero_abil("sail") - 1)
+	return maxi(1, int(roundf(d)))
+
+
+## Days for a specific ship (its refits count); a flagship moves at its slowest escort's pace.
+func ship_days(sh: Dictionary, to: String) -> int:
+	var d := 0
+	for o in fleet_ships(sh):
+		d = maxi(d, travel_days(o["port"], to, o["type"], o["owner"], o))
 	return d
 
 
@@ -184,6 +194,7 @@ func _add_ship(hid: String, type: String, port: String, ship_name: String = "") 
 		"id": id, "owner": hid, "type": type, "name": ship_name, "port": port,
 		"from": port, "to": "", "depart": 0, "arrive": 0, "cargo": {}, "route": null,
 		"flagship": hid == pid() and _ships_of(hid).is_empty(),
+		"mods": {"hull": 0, "sail": 0, "hold": 0, "guns": 0}, "fleet": 0, "slot": "main",
 	}
 	s["ships"].append(sh)
 	return sh
@@ -234,7 +245,190 @@ func cargo_used(sh: Dictionary) -> int:
 
 
 func cargo_cap(sh: Dictionary) -> int:
-	return int(GameData.SHIPS[sh["type"]]["cargo"])
+	var base := float(GameData.SHIPS[sh["type"]]["cargo"])
+	return int(roundf(base * (1.0 + 0.15 * float(sh.get("mods", {}).get("hold", 0)))))
+
+
+func mod_lvl(sh: Dictionary, k: String) -> int:
+	return int(sh.get("mods", {}).get(k, 0))
+
+
+## Speed multiplier from refits: sails help, the first hold extension drags.
+func speed_mult(sh: Dictionary) -> float:
+	return (1.0 + 0.1 * float(mod_lvl(sh, "sail"))) * (0.92 if mod_lvl(sh, "hold") > 0 else 1.0)
+
+
+# ------------------------------------------------------------------ fleet (escorts sail with the flagship)
+## The flagship plus every escort attached to it; a lone ship is a fleet of one.
+func fleet_ships(sh: Dictionary) -> Array:
+	if sh.is_empty():
+		return []
+	if not sh.get("flagship", false):
+		return [sh]
+	var out := [sh]
+	for o in _ships_of(sh["owner"]):
+		if int(o.get("fleet", 0)) == int(sh["id"]) and o["id"] != sh["id"]:
+			out.append(o)
+	return out
+
+
+func fleet_cargo_used(sh: Dictionary) -> int:
+	var n := 0
+	for o in fleet_ships(sh):
+		n += cargo_used(o)
+	return n
+
+
+func fleet_cargo_cap(sh: Dictionary) -> int:
+	var n := 0
+	for o in fleet_ships(sh):
+		n += cargo_cap(o)
+	return n
+
+
+## Merged hold of a fleet: {good: {qty, cost}} with cost averaged across ships.
+func fleet_cargo(sh: Dictionary) -> Dictionary:
+	var out := {}
+	for o in fleet_ships(sh):
+		for g in o["cargo"]:
+			var c: Dictionary = o["cargo"][g]
+			var e: Dictionary = out.get(g, {"qty": 0, "cost": 0.0})
+			var total: float = float(e["qty"]) * float(e["cost"]) + float(c["qty"]) * float(c["cost"])
+			e["qty"] = int(e["qty"]) + int(c["qty"])
+			e["cost"] = total / float(e["qty"])
+			out[g] = e
+	return out
+
+
+func in_fleet(sh: Dictionary) -> bool:
+	return int(sh.get("fleet", 0)) != 0
+
+
+func join_fleet(ship_id: int) -> Dictionary:
+	var sh := ship(ship_id)
+	var fl := flagship()
+	if sh.is_empty() or fl.is_empty() or sh["owner"] != pid() or sh["flagship"]:
+		return _fail("无效飞艇。")
+	if not docked(sh) or not docked(fl) or sh["port"] != fl["port"]:
+		return _fail("这艘船要和旗舰停在同一座港口。")
+	if sh["route"] != null:
+		return _fail("先清除它的自动航线。")
+	if fleet_ships(fl).size() >= GameData.FLEET_MAX:
+		return _fail("一支船队最多 %d 艘。" % GameData.FLEET_MAX)
+	sh["fleet"] = int(fl["id"])
+	if not sh.has("slot"):
+		sh["slot"] = "main"
+	return {"ok": true, "msg": "%s 加入旗舰队。" % sh["name"]}
+
+
+func leave_fleet(ship_id: int) -> Dictionary:
+	var sh := ship(ship_id)
+	if sh.is_empty() or not in_fleet(sh):
+		return _fail("这艘船不在船队里。")
+	if not docked(sh):
+		return _fail("航行中不能脱队。")
+	sh["fleet"] = 0
+	return {"ok": true, "msg": "%s 脱离船队。" % sh["name"]}
+
+
+func set_slot(ship_id: int, slot: String) -> Dictionary:
+	var sh := ship(ship_id)
+	if sh.is_empty() or not GameData.SLOTS.has(slot):
+		return _fail("无效编队位置。")
+	sh["slot"] = slot
+	return {"ok": true, "msg": "%s 编入%s。" % [sh["name"], GameData.SLOTS[slot]]}
+
+
+func rename_ship(ship_id: int, new_name: String) -> Dictionary:
+	var sh := ship(ship_id)
+	new_name = new_name.strip_edges()
+	if sh.is_empty() or sh["owner"] != pid():
+		return _fail("无效飞艇。")
+	if new_name == "" or new_name.length() > 8:
+		return _fail("船名要在 1–8 个字之间。")
+	sh["name"] = new_name
+	return {"ok": true, "msg": "改名为「%s」。" % new_name}
+
+
+## Refit a docked ship at the shipyard: gold plus goods pulled from hold, warehouse, then market.
+func refit_cost(sh: Dictionary, k: String) -> Dictionary:
+	var r: Dictionary = GameData.REFITS[k]
+	var lvl := mod_lvl(sh, k)
+	var gold := int(float(GameData.SHIPS[sh["type"]]["price"]) * float(r["gold"]) * float(lvl + 1))
+	var mats := {}
+	for g in r["mats"]:
+		mats[g] = int(r["mats"][g]) * (lvl + 1)
+	return {"gold": gold, "mats": mats}
+
+
+## Where the refit goods would come from and what the market part would cost.
+func refit_plan(sh: Dictionary, k: String) -> Dictionary:
+	var need := refit_cost(sh, k)
+	var port: String = sh["port"]
+	var hid: String = sh["owner"]
+	var buy_gold := 0
+	var ok := true
+	var parts := []
+	for g in need["mats"]:
+		var want: int = need["mats"][g]
+		var from_hold := mini(want, int(sh["cargo"].get(g, {}).get("qty", 0)))
+		want -= from_hold
+		var from_wh := 0
+		if want > 0 and Industry.has_wh(self, port, hid):
+			from_wh = mini(want, int(Industry.wh(self, port, hid).get(g, 0)))
+			want -= from_wh
+		var from_mkt := 0
+		if want > 0:
+			var st := int(s["ports"][port]["market"][g]["stock"])
+			from_mkt = mini(want, maxi(0, st - 1))
+			buy_gold += quote_buy(port, g, from_mkt, hid)["cost"]
+			want -= from_mkt
+		if want > 0:
+			ok = false
+		parts.append({"good": g, "hold": from_hold, "wh": from_wh, "mkt": from_mkt, "short": want})
+	return {"ok": ok, "gold": int(need["gold"]) + buy_gold, "fee": int(need["gold"]), "parts": parts}
+
+
+func refit(ship_id: int, k: String) -> Dictionary:
+	var sh := ship(ship_id)
+	if sh.is_empty() or sh["owner"] != pid() or not docked(sh):
+		return _fail("只能改造停在港口的飞艇。")
+	if not GameData.REFITS.has(k):
+		return _fail("没有这项改造。")
+	if mod_lvl(sh, k) >= GameData.REFIT_MAX:
+		return _fail("%s已是最高级。" % GameData.REFITS[k]["name"])
+	var plan := refit_plan(sh, k)
+	if not plan["ok"]:
+		var shorts := []
+		for pt in plan["parts"]:
+			if int(pt["short"]) > 0:
+				shorts.append("%s ×%d" % [GameData.good_name(pt["good"]), int(pt["short"])])
+		return _fail("物料不够：缺 " + "、".join(shorts) + "。")
+	var h := house()
+	if h["gold"] < plan["gold"]:
+		return _fail("需要 %d 金（含采购物料）。" % plan["gold"])
+	var port: String = sh["port"]
+	for pt in plan["parts"]:
+		var g: String = pt["good"]
+		if int(pt["hold"]) > 0:
+			sh["cargo"][g]["qty"] = int(sh["cargo"][g]["qty"]) - int(pt["hold"])
+			if int(sh["cargo"][g]["qty"]) <= 0:
+				sh["cargo"].erase(g)
+		if int(pt["wh"]) > 0:
+			Industry.wh_take(self, port, pid(), g, int(pt["wh"]))
+		if int(pt["mkt"]) > 0:
+			var q := quote_buy(port, g, int(pt["mkt"]), pid())
+			h["gold"] -= q["cost"]
+			h["month_out"] += q["cost"]
+			s["ports"][port]["market"][g]["stock"] -= q["qty"]
+			_note_trade(port, g, int(q["qty"]))
+	h["gold"] -= plan["fee"]
+	h["month_out"] += plan["fee"]
+	if not sh.has("mods"):
+		sh["mods"] = {"hull": 0, "sail": 0, "hold": 0, "guns": 0}
+	sh["mods"][k] = mod_lvl(sh, k) + 1
+	add_exp(30)
+	return {"ok": true, "msg": "%s：%s升到 %d 级。" % [sh["name"], GameData.REFITS[k]["name"], mod_lvl(sh, k)]}
 
 
 func price_factor(stock: float, eq_ref: float = NEUTRAL_EQ) -> float:
@@ -356,7 +550,11 @@ func fuel_cost(type: String, from: String, to: String) -> int:
 
 ## Supplies for one of the player's own voyages (shorter trips burn less).
 func fuel_cost_for(sh: Dictionary, to: String) -> int:
-	return travel_days(sh["port"], to, sh["type"], sh["owner"]) * int(GameData.SHIPS[sh["type"]]["fuel_day"]) * GameData.FUEL_PRICE
+	var days := ship_days(sh, to)
+	var c := 0
+	for o in fleet_ships(sh):
+		c += days * int(GameData.SHIPS[o["type"]]["fuel_day"]) * GameData.FUEL_PRICE
+	return c
 
 
 func net_worth(hid: String = "") -> float:
@@ -402,7 +600,7 @@ func buy(ship_id: int, good: String, qty: int) -> Dictionary:
 	if not GameData.trades(sh["port"], good):
 		return _fail("%s 的交易所不收%s。" % [GameData.port_name(sh["port"]), GameData.good_name(good)])
 	var h := house(sh["owner"])
-	qty = mini(qty, cargo_cap(sh) - cargo_used(sh))
+	qty = mini(qty, fleet_cargo_cap(sh) - fleet_cargo_used(sh))
 	if qty <= 0:
 		return _fail("货舱已满。")
 	var q := quote_buy(sh["port"], good, qty, sh["owner"], h["gold"])
@@ -411,22 +609,56 @@ func buy(ship_id: int, good: String, qty: int) -> Dictionary:
 	h["gold"] -= q["cost"]
 	h["month_out"] += q["cost"]
 	s["ports"][sh["port"]]["market"][good]["stock"] -= q["qty"]
-	var c: Dictionary = sh["cargo"].get(good, {"qty": 0, "cost": 0.0})
-	var total: float = float(c["qty"]) * float(c["cost"]) + q["cost"]
-	c["qty"] = int(c["qty"]) + int(q["qty"])
-	c["cost"] = total / float(c["qty"])
-	sh["cargo"][good] = c
+	_stow(sh, good, int(q["qty"]), float(q["cost"]) / float(q["qty"]))
 	if sh["owner"] == pid():
 		_note_trade(sh["port"], good, int(q["qty"]))
 		_update_intel(sh["port"])
 	return {"ok": true, "msg": "买入 %s ×%d，花费 %d 金。" % [GameData.good_name(good), q["qty"], q["cost"]], "qty": q["qty"], "cost": q["cost"]}
 
 
+## Put bought goods into the ship, spilling over into its escorts.
+func _stow(sh: Dictionary, good: String, qty: int, unit: float) -> void:
+	for o in fleet_ships(sh):
+		var room := cargo_cap(o) - cargo_used(o)
+		var n := mini(room, qty)
+		if n <= 0:
+			continue
+		var c: Dictionary = o["cargo"].get(good, {"qty": 0, "cost": 0.0})
+		var total: float = float(c["qty"]) * float(c["cost"]) + unit * n
+		c["qty"] = int(c["qty"]) + n
+		c["cost"] = total / float(c["qty"])
+		o["cargo"][good] = c
+		qty -= n
+		if qty <= 0:
+			break
+
+
+## Take goods out of a fleet's holds (escorts first, so the flagship keeps the rest).
+## Returns {qty, cost}: units removed and their average cost.
+func _unstow(sh: Dictionary, good: String, qty: int) -> Dictionary:
+	var took := 0
+	var total := 0.0
+	var ships := fleet_ships(sh)
+	ships.reverse()
+	for o in ships:
+		if not o["cargo"].has(good) or qty <= 0:
+			continue
+		var c: Dictionary = o["cargo"][good]
+		var n := mini(int(c["qty"]), qty)
+		took += n
+		total += float(c["cost"]) * n
+		qty -= n
+		c["qty"] = int(c["qty"]) - n
+		if int(c["qty"]) <= 0:
+			o["cargo"].erase(good)
+	return {"qty": took, "cost": (total / float(took)) if took > 0 else 0.0}
+
+
 func sell(ship_id: int, good: String, qty: int) -> Dictionary:
 	var sh := ship(ship_id)
 	if sh.is_empty() or not docked(sh):
 		return _fail("飞艇不在港口。")
-	var c: Dictionary = sh["cargo"].get(good, {})
+	var c: Dictionary = fleet_cargo(sh).get(good, {})
 	if c.is_empty():
 		return _fail("货舱里没有这种货。")
 	if not GameData.trades(sh["port"], good):
@@ -439,10 +671,8 @@ func sell(ship_id: int, good: String, qty: int) -> Dictionary:
 	h["gold"] += q["revenue"]
 	h["month_in"] += q["revenue"]
 	s["ports"][sh["port"]]["market"][good]["stock"] += qty
-	var profit := int(q["revenue"] - float(c["cost"]) * qty)
-	c["qty"] = int(c["qty"]) - qty
-	if c["qty"] <= 0:
-		sh["cargo"].erase(good)
+	var taken := _unstow(sh, good, qty)
+	var profit := int(q["revenue"] - float(taken["cost"]) * qty)
 	if sh["owner"] == pid():
 		s["stats"]["trades"] += 1
 		s["stats"]["profit"] += profit
@@ -468,20 +698,25 @@ func depart(ship_id: int, dest: String) -> Dictionary:
 		return _fail("飞艇不在港口。")
 	if dest == sh["port"] or not GameData.PORTS.has(dest):
 		return _fail("目的地无效。")
+	if in_fleet(sh):
+		return _fail("%s 随旗舰队行动。" % sh["name"])
 	var h := house(sh["owner"])
 	var fc := fuel_cost_for(sh, dest)
 	if h["gold"] < fc:
 		return _fail("补给费用 %d 金，金币不足。" % fc)
 	h["gold"] -= fc
 	h["month_out"] += fc
-	sh["from"] = sh["port"]
-	sh["to"] = dest
-	sh["depart"] = s["day"]
-	sh["arrive"] = s["day"] + travel_days(sh["port"], dest, sh["type"], sh["owner"])
-	sh["port"] = ""
+	var days := ship_days(sh, dest)
+	for o in fleet_ships(sh):
+		o["from"] = o["port"]
+		o["to"] = dest
+		o["depart"] = s["day"]
+		o["arrive"] = s["day"] + days
+		o["port"] = ""
 	if sh["owner"] == pid() and sh["flagship"]:
 		s["sailed"] = true
-	return {"ok": true, "msg": "%s 起航前往 %s，预计 %d 天，补给 %d 金。" % [sh["name"], GameData.port_name(dest), sh["arrive"] - sh["depart"], fc]}
+	var n := fleet_ships(sh).size()
+	return {"ok": true, "msg": "%s%s 起航前往 %s，预计 %d 天，补给 %d 金。" % [sh["name"], ("等 %d 艘" % n) if n > 1 else "", GameData.port_name(dest), days, fc]}
 
 
 func buy_ship(type: String, port: String) -> Dictionary:
@@ -516,21 +751,72 @@ func sell_ship(ship_id: int) -> Dictionary:
 	var was_flag: bool = sh["flagship"]
 	s["ships"].erase(sh)
 	if was_flag:
-		_ships_of(pid())[0]["flagship"] = true
+		var nf: Dictionary = _ships_of(pid())[0]
+		nf["flagship"] = true
+		nf["fleet"] = 0
+		nf["route"] = null
+		for o in _ships_of(pid()):
+			if int(o.get("fleet", 0)) == int(sh["id"]):
+				o["fleet"] = int(nf["id"])
 	return {"ok": true, "msg": "出售 %s，回收 %d 金。" % [sh["name"], v]}
 
 
-## Auto route: buy `good` at `a`, sell at `b`, loop. Empty dict clears it.
+## Auto route: a loop of 2–4 stops; at each stop the ship sells what it carries (except goods
+## it is told to buy there) and loads the stop's shopping list. Empty dict clears the route.
+## The old {a, b, good} shape is still accepted and converted.
 func set_route(ship_id: int, route: Dictionary) -> Dictionary:
 	var sh := ship(ship_id)
 	if sh.is_empty() or sh["owner"] != pid():
 		return _fail("无效飞艇。")
-	if sh["flagship"] and not route.is_empty():
+	if route.is_empty():
+		sh["route"] = null
+		return {"ok": true, "msg": "航线已清除。"}
+	if sh["flagship"]:
 		return _fail("旗舰由你亲自指挥，不能设自动航线。")
-	if not route.is_empty() and (not GameData.trades(route["a"], route["good"]) or not GameData.trades(route["b"], route["good"])):
-		return _fail("这两个港口必须都交易%s。" % GameData.good_name(route["good"]))
-	sh["route"] = null if route.is_empty() else route
-	return {"ok": true, "msg": "航线已更新。"}
+	if in_fleet(sh):
+		return _fail("随行的船不能单独跑航线，先让它脱队。")
+	route = normalize_route(route)
+	var stops: Array = route["stops"]
+	if stops.size() < 2 or stops.size() > GameData.ROUTE_MAX_STOPS:
+		return _fail("航线要有 2–%d 站。" % GameData.ROUTE_MAX_STOPS)
+	for i in stops.size():
+		var st: Dictionary = stops[i]
+		if not GameData.PORTS.has(st["port"]):
+			return _fail("无效港口。")
+		if st["port"] == stops[(i + 1) % stops.size()]["port"]:
+			return _fail("相邻两站不能是同一座港口。")
+		if st["buy"].size() > GameData.ROUTE_MAX_BUYS:
+			return _fail("每站最多买 %d 种货。" % GameData.ROUTE_MAX_BUYS)
+	var any_buy := false
+	for st in stops:
+		if not st["buy"].is_empty():
+			any_buy = true
+	if not any_buy:
+		return _fail("至少有一站要买点什么。")
+	sh["route"] = {"stops": stops, "i": 0, "total": int(route.get("total", 0))}
+	return {"ok": true, "msg": "航线已更新：%s。" % route_text(sh["route"])}
+
+
+static func normalize_route(r: Dictionary) -> Dictionary:
+	if r.has("stops"):
+		var stops := []
+		for st in r["stops"]:
+			var buys := []
+			for g in st.get("buy", []):
+				buys.append(str(g))
+			stops.append({"port": str(st["port"]), "buy": buys})
+		return {"stops": stops, "i": int(r.get("i", 0)), "total": int(r.get("total", 0))}
+	return {"stops": [{"port": str(r["a"]), "buy": [str(r["good"])]}, {"port": str(r["b"]), "buy": []}], "i": 0, "total": int(r.get("total", 0))}
+
+
+static func route_text(r: Dictionary) -> String:
+	var parts := []
+	for st in r["stops"]:
+		var buys := []
+		for g in st["buy"]:
+			buys.append(GameData.good_name(g))
+		parts.append(GameData.port_name(st["port"]) + (("（买" + "、".join(buys) + "）") if not buys.is_empty() else ""))
+	return " → ".join(parts)
 
 
 func take_loan(amount: int) -> Dictionary:
@@ -691,7 +977,7 @@ func contract(cid: int) -> Dictionary:
 
 
 func can_fulfill(sh: Dictionary, c: Dictionary) -> bool:
-	return docked(sh) and sh["port"] == c["port"] and sh["cargo"].has(c["good"]) and int(sh["cargo"][c["good"]]["qty"]) >= int(c["qty"])
+	return docked(sh) and sh["port"] == c["port"] and int(fleet_cargo(sh).get(c["good"], {}).get("qty", 0)) >= int(c["qty"])
 
 
 func fulfill(ship_id: int, cid: int) -> Dictionary:
@@ -702,11 +988,8 @@ func fulfill(ship_id: int, cid: int) -> Dictionary:
 	if not can_fulfill(sh, c):
 		return _fail("需要在 %s 停靠，并带着 %d 件%s。" % [GameData.port_name(c["port"]), int(c["qty"]), GameData.good_name(c["good"])])
 	var hid: String = sh["owner"]
-	var item: Dictionary = sh["cargo"][c["good"]]
-	var unit_cost := float(item["cost"])
-	item["qty"] = int(item["qty"]) - int(c["qty"])
-	if int(item["qty"]) <= 0:
-		sh["cargo"].erase(c["good"])
+	var taken := _unstow(sh, c["good"], int(c["qty"]))
+	var unit_cost := float(taken["cost"])
 	var h := house(hid)
 	h["gold"] += float(c["reward"])
 	h["month_in"] += float(c["reward"])
@@ -738,13 +1021,13 @@ func deliver_mats(ship_id: int) -> Dictionary:
 	for g in need:
 		var have: int = int(lh["mats"].get(g, 0))
 		var want: int = int(need[g]) - have
-		if want <= 0 or not sh["cargo"].has(g):
+		if want <= 0:
 			continue
-		var n := mini(want, int(sh["cargo"][g]["qty"]))
+		var taken := _unstow(sh, g, want)
+		var n: int = taken["qty"]
+		if n <= 0:
+			continue
 		lh["mats"][g] = have + n
-		sh["cargo"][g]["qty"] -= n
-		if sh["cargo"][g]["qty"] <= 0:
-			sh["cargo"].erase(g)
 		parts.append("%s ×%d" % [GameData.good_name(g), n])
 	if parts.is_empty():
 		return _fail("货舱里没有灯塔需要的物资。")
@@ -760,16 +1043,11 @@ func load_wh(ship_id: int, good: String, qty: int) -> Dictionary:
 	var hid: String = sh["owner"]
 	if not Industry.has_wh(self, port, hid):
 		return _fail("这里没有你的仓库。")
-	qty = mini(qty, cargo_cap(sh) - cargo_used(sh))
+	qty = mini(qty, fleet_cargo_cap(sh) - fleet_cargo_used(sh))
 	var n := Industry.wh_take(self, port, hid, good, qty)
 	if n <= 0:
 		return _fail("仓库里没有可装的%s，或货舱已满。" % GameData.good_name(good))
-	var unit := float(GameData.GOODS[good]["base"]) * 0.6
-	var c: Dictionary = sh["cargo"].get(good, {"qty": 0, "cost": 0.0})
-	var total: float = float(c["qty"]) * float(c["cost"]) + unit * n
-	c["qty"] = int(c["qty"]) + n
-	c["cost"] = total / float(c["qty"])
-	sh["cargo"][good] = c
+	_stow(sh, good, n, float(GameData.GOODS[good]["base"]) * 0.6)
 	return {"ok": true, "msg": "从仓库装上 %s ×%d。" % [GameData.good_name(good), n], "qty": n}
 
 
@@ -781,15 +1059,13 @@ func unload_wh(ship_id: int, good: String, qty: int) -> Dictionary:
 	var hid: String = sh["owner"]
 	if not Industry.has_wh(self, port, hid):
 		return _fail("这里没有你的仓库。")
-	var c: Dictionary = sh["cargo"].get(good, {})
+	var c: Dictionary = fleet_cargo(sh).get(good, {})
 	if c.is_empty():
 		return _fail("货舱里没有%s。" % GameData.good_name(good))
 	var n := Industry.wh_add(self, port, hid, good, mini(qty, int(c["qty"])))
 	if n <= 0:
 		return _fail("仓库满了。")
-	c["qty"] = int(c["qty"]) - n
-	if int(c["qty"]) <= 0:
-		sh["cargo"].erase(good)
+	_unstow(sh, good, n)
 	return {"ok": true, "msg": "卸入仓库 %s ×%d。" % [GameData.good_name(good), n], "qty": n}
 
 
@@ -1013,35 +1289,55 @@ func _on_arrive(sh: Dictionary) -> void:
 
 
 func _run_route(sh: Dictionary) -> void:
+	if not sh["route"].has("stops"):
+		sh["route"] = normalize_route(sh["route"])
 	var r: Dictionary = sh["route"]
-	var a: String = r["a"]
-	var b: String = r["b"]
-	var g: String = r["good"]
+	var stops: Array = r["stops"]
 	var port: String = sh["port"]
-	if port == b and sh["cargo"].has(g):
+	var idx := -1
+	for i in stops.size():
+		if stops[i]["port"] == port:
+			idx = i
+	if idx < 0:
+		# off the loop: head for the first stop
+		var res0 := depart(sh["id"], stops[0]["port"])
+		if not res0["ok"]:
+			r["stalled"] = res0["msg"]
+		return
+	var here: Dictionary = stops[idx]
+	var buys: Array = here["buy"]
+	# sell everything this stop is not meant to load
+	for g in sh["cargo"].keys():
+		if g in buys or not GameData.trades(port, g):
+			continue
 		var res := sell(sh["id"], g, int(sh["cargo"][g]["qty"]))
 		if res["ok"]:
 			r["last_profit"] = res["profit"]
 			r["total"] = int(r.get("total", 0)) + int(res["profit"])
-	if port == a and cargo_used(sh) < cargo_cap(sh):
-		# only buy while it still pays: stop when price reaches 85% of target's sell price
-		var limit := float(sell_price(b, g)) * 0.85
+	# load the shopping list, an even share of the hold per good, while it still pays somewhere ahead
+	if not buys.is_empty():
+		var share := maxi(1, (cargo_cap(sh) - cargo_used(sh)) / buys.size())
 		var h := house()
 		var reserve := 1500.0
-		var n := 0
-		while cargo_used(sh) < cargo_cap(sh) and buy_price(a, g) <= limit and h["gold"] - buy_price(a, g) > reserve:
-			buy(sh["id"], g, 1)
-			n += 1
-			if n > 400:
-				break
-	var dest := b if port == a else a
-	if port != a and port != b:
-		dest = a
-	var res2 := depart(sh["id"], dest)
+		for g in buys:
+			var best_sell := 0
+			for j in range(1, stops.size()):
+				var other: Dictionary = stops[(idx + j) % stops.size()]
+				if not g in other["buy"]:
+					best_sell = maxi(best_sell, sell_price(other["port"], g))
+			var limit := float(best_sell) * 0.85
+			var n := 0
+			while n < share and cargo_used(sh) < cargo_cap(sh) and buy_price(port, g) <= limit and h["gold"] - buy_price(port, g) > reserve:
+				if not buy(sh["id"], g, 1)["ok"]:
+					break
+				n += 1
+	var nxt: Dictionary = stops[(idx + 1) % stops.size()]
+	r["i"] = (idx + 1) % stops.size()
+	var res2 := depart(sh["id"], nxt["port"])
 	if not res2["ok"]:
-		sh["route"]["stalled"] = res2["msg"]
+		r["stalled"] = res2["msg"]
 	else:
-		sh["route"].erase("stalled")
+		r.erase("stalled")
 
 
 func _tick_lighthouses() -> void:
@@ -1177,6 +1473,15 @@ func from_json(text: String) -> bool:
 			sh[k] = int(sh[k])
 		for g in sh["cargo"]:
 			sh["cargo"][g]["qty"] = int(sh["cargo"][g]["qty"])
+		if not sh.has("mods"):
+			sh["mods"] = {"hull": 0, "sail": 0, "hold": 0, "guns": 0}
+		for k in sh["mods"]:
+			sh["mods"][k] = int(sh["mods"][k])
+		sh["fleet"] = int(sh.get("fleet", 0))
+		if not sh.has("slot"):
+			sh["slot"] = "main"
+		if sh["route"] != null:
+			sh["route"] = normalize_route(sh["route"])
 	if not s.has("contracts"):
 		s["contracts"] = []
 		s["next_contract_id"] = 1

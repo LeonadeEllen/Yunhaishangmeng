@@ -136,6 +136,19 @@ const SHIPS := {
 	"freighter": {"name": "货艇",     "price": 12000, "cargo": 80,  "speed": 1.0,  "fuel_day": 9,  "wage": 600,  "sprite": 2},
 	"galleon":   {"name": "盖伦飞艇", "price": 26000, "cargo": 160, "speed": 0.85, "fuel_day": 14, "wage": 1100, "sprite": 3},
 }
+# Refits done at any shipyard, 0-3 levels each. Gold is a share of the hull's price; goods are
+# taken from the ship's hold, then your warehouse here, then bought at the market.
+const REFITS := {
+	"hull": {"name": "船体加固", "gold": 0.15, "mats": {"steel": 8},  "desc": "每级耐久 +20%（空战用）"},
+	"sail": {"name": "换帆",     "gold": 0.20, "mats": {"canvas": 12}, "desc": "每级航速 +10%，补给随之减少"},
+	"hold": {"name": "扩舱",     "gold": 0.25, "mats": {"steel": 5, "canvas": 5}, "desc": "每级货舱 +15%；第 1 级航速 −8%"},
+	"guns": {"name": "加炮",     "gold": 0.10, "mats": {"cannon": 2}, "desc": "每级炮位 +2（空战用）"},
+}
+const REFIT_MAX := 3
+const FLEET_MAX := 5
+const SLOTS := {"van": "先锋", "main": "主力", "rear": "后卫"}
+const ROUTE_MAX_STOPS := 4
+const ROUTE_MAX_BUYS := 3
 const FUEL_PRICE := 12   # supplies cost per fuel_day unit
 
 const HOUSES := {
