@@ -16,21 +16,27 @@ static func ship_turn(sim: Sim, sh: Dictionary) -> void:
 	for c in sim.open_contracts(port):
 		if sim.can_fulfill(sh, c):
 			sim.fulfill(sh["id"], c["id"])
-	if port == home:
+	# hand materials to the lighthouse site only while there is working cash left; a poor
+	# house sells what it carries instead of starving next to a pile of stone
+	if port == home and h["gold"] >= WORKING_CAPITAL:
 		sim.deliver_from_wh(hid)
 		sim.deliver_mats(sh["id"])
-		# materials made right here: buy and hand them over directly
+		# materials on sale right here: buy and hand them over directly (cheap signature goods
+		# freely, scarce imports only while a working reserve stays in the chest)
 		var here_needs := _needs(sim, hid)
 		for g in here_needs:
-			if g in GameData.PORTS[home]["make"]:
-				var free := sim.cargo_cap(sh) - sim.cargo_used(sh)
-				var budget: float = h["gold"] - WORKING_CAPITAL * 0.3
-				var q := sim.quote_buy(home, g, mini(int(here_needs[g]), free), hid, budget)
-				if q["qty"] > 0:
-					sim.buy(sh["id"], g, q["qty"])
+			var free := sim.cargo_cap(sh) - sim.cargo_used(sh)
+			var local: bool = g in GameData.PORTS[home]["make"]
+			var budget: float = h["gold"] - (WORKING_CAPITAL * 0.3 if local else WORKING_CAPITAL)
+			var q := sim.quote_buy(home, g, mini(int(here_needs[g]), free), hid, budget)
+			if q["qty"] > 0:
+				sim.buy(sh["id"], g, q["qty"])
 		sim.deliver_mats(sh["id"])
 	# sell everything that is not a needed material on its way home
+	# (a house short of working cash sells its materials too rather than starve)
 	var needs := _needs(sim, hid)
+	if h["gold"] < WORKING_CAPITAL:
+		needs = {}
 	var chase := _held_contract(sim, sh)
 	for g in sh["cargo"].keys():
 		if needs.has(g) and port != home:
@@ -117,7 +123,7 @@ static func _best_plan(sim: Sim, sh: Dictionary, needs: Dictionary) -> Dictionar
 	if lh["stage"] < GameData.LIGHTHOUSE.size() and h["gold"] > float(GameData.LIGHTHOUSE[lh["stage"]]["gold"]) * 0.6:
 		mat_w = MAT_WEIGHT * 2.5
 	var best := {}
-	var best_rate := 25.0
+	var best_rate := 12.0
 	for g in GameData.traded_goods(port):
 		var unit := sim.buy_price(port, g, hid)
 		var max_qty := mini(space, int(budget / maxf(1.0, unit * 1.3)))
@@ -126,7 +132,7 @@ static func _best_plan(sim: Sim, sh: Dictionary, needs: Dictionary) -> Dictionar
 		for qty in [max_qty, max_qty / 2, max_qty / 4]:
 			if qty < 5:
 				continue
-			var q := sim.quote_buy(port, g, qty, hid, budget)
+			var q := sim.est_buy(port, g, qty, hid, budget)
 			if q["qty"] < 5:
 				continue
 			for dest in GameData.PORT_IDS:
@@ -139,12 +145,14 @@ static func _best_plan(sim: Sim, sh: Dictionary, needs: Dictionary) -> Dictionar
 					if c["good"] == g and int(q["qty"]) >= int(c["qty"]) and int(sim.s["day"]) + days <= int(c["end"]):
 						deal = c
 				if not deal.is_empty():
-					value = float(deal["reward"]) + sim.quote_sell(dest, g, int(q["qty"]) - int(deal["qty"]), hid)["revenue"]
-				elif needs.has(g) and dest == home:
+					value = float(deal["reward"]) + sim.est_sell(dest, g, int(q["qty"]) - int(deal["qty"]), hid)["revenue"]
+				elif needs.has(g) and dest == home and h["gold"] - float(q["cost"]) >= WORKING_CAPITAL:
+					# a needed material is worth its weight, and a rich house pays whatever it costs
 					var n := mini(int(q["qty"]), int(needs[g]))
-					value = n * float(GameData.GOODS[g]["base"]) * mat_w + sim.quote_sell(dest, g, int(q["qty"]) - n, hid)["revenue"]
+					var per := maxf(float(GameData.GOODS[g]["base"]) * mat_w, unit * 1.25)
+					value = n * per + sim.est_sell(dest, g, int(q["qty"]) - n, hid)["revenue"]
 				else:
-					value = sim.quote_sell(dest, g, q["qty"], hid)["revenue"]
+					value = sim.est_sell(dest, g, q["qty"], hid)["revenue"]
 				var profit: float = value - q["cost"] - sim.fuel_cost(sh["type"], port, dest)
 				var rate := profit / float(days + 1)
 				if rate > best_rate:
@@ -157,6 +165,8 @@ static func _best_source(sim: Sim, sh: Dictionary) -> String:
 	var best := ""
 	var best_gap := 0.0
 	for pid in GameData.PORT_IDS:
+		if pid == sh["port"]:
+			continue
 		for g in GameData.traded_goods(pid):
 			var gap := 0.0
 			for dest in GameData.PORT_IDS:
@@ -182,8 +192,11 @@ static func monthly(sim: Sim, hid: String) -> void:
 	if lh["stage"] < GameData.LIGHTHOUSE.size():
 		var next_cost: float = GameData.LIGHTHOUSE[lh["stage"]]["gold"]
 		var spare: float = h["gold"] - WORKING_CAPITAL - (next_cost * 0.5 if lh["stage"] == 0 else next_cost)
+		Industry.ai_blueprints(sim, hid)
 		if spare > 4000.0:
 			Industry.ai_build(sim, hid, spare)
+		if spare > 60000.0:
+			Industry.ai_upgrade(sim, hid, spare * 0.5)
 		# contest the player's strongest foothold now and then
 		elif lh["stage"] >= 1 and sim.rng.randf() < 0.15:
 			var me := sim.pid()
@@ -197,7 +210,7 @@ static func monthly(sim: Sim, hid: String) -> void:
 						break
 				break
 	# Keep enough for the next lighthouse stage before expanding.
-	if ships.size() < 3 and h["gold"] > 26000 + 15000:
+	if ships.size() < sim.max_ships(hid) and h["gold"] > 26000 + 15000:
 		var home: String = GameData.HOUSES[hid]["home"]
 		h["gold"] -= sim.ship_price("galleon", hid)
 		sim._add_ship(hid, "galleon", home)

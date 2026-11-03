@@ -1,8 +1,9 @@
 class_name Industry
-## Town building, production chains, warehouses and city prosperity.
-## State per port (in sim.s["ports"][pid]):
-##   plots: Array of null or {b, owner, in_mode ("wh"|"buy"), out_mode ("wh"|"sell"|"lh"), acc, status}
-##   wh: {hid: {good: qty}}, whcap: {hid: int}, prosp: int 1..5, growth: int
+## Workshops (one per good), trading posts (商馆 = warehouse) and production.
+## Per port (in sim.s["ports"][pid]):
+##   plots: Array of null or {b: good id, lvl 1..3, owner, in_mode ("wh"|"buy"), out_mode ("wh"|"sell"|"lh"), status}
+##   wh: {hid: {good: qty}}, whcap: {hid: int}
+## Everything produced is in whole units: a level-1 workshop makes TIER_OUTPUT[tier] units a day.
 
 
 static func init_port(sim: Sim, pid: String) -> void:
@@ -13,37 +14,41 @@ static func init_port(sim: Sim, pid: String) -> void:
 	p["plots"] = plots
 	p["wh"] = {}
 	p["whcap"] = {}
-	p["prosp"] = int(GameData.PORTS[pid]["prosp"])
-	p["growth"] = 0
 
 
 # ------------------------------------------------------------------ queries
-
-static func open_plots(sim: Sim, pid: String) -> int:
-	return mini(GameData.PORTS[pid]["plots"].size(), 2 + int(sim.s["ports"][pid]["prosp"]))
-
 
 static func terrain(pid: String, i: int) -> String:
 	return GameData.PORTS[pid]["plots"][i]
 
 
-static func buildings_for(pid: String, i: int) -> Array:
+static func terrain_name(pid: String, i: int) -> String:
 	var t := terrain(pid, i)
-	return GameData.BUILDING_IDS.filter(func(b): return GameData.BUILDINGS[b]["plot"] == t)
+	return "工坊地" if t == "workshop" else GameData.good_name(t) + "产地"
 
 
-static func build_cost(sim: Sim, b: String, hid: String) -> int:
-	return int(float(GameData.BUILDINGS[b]["cost"]) * (0.75 if sim.perk(hid) == "industry" else 1.0))
+## Goods whose workshop fits plot i (blueprint not considered).
+static func goods_for(pid: String, i: int) -> Array:
+	return GameData.GOOD_IDS.filter(func(g): return GameData.plot_fits(pid, i, g))
 
 
-static func rate(sim: Sim, pid: String, b: String, hid: String) -> float:
-	var d: Dictionary = GameData.BUILDINGS[b]
-	var r: float = d["rate"]
-	if GameData.PORTS[pid]["signature"] in d["out"]:
-		r *= GameData.SIGNATURE_BONUS
-	if sim.perk(hid) == "industry":
-		r *= 1.15
-	return r
+static func build_cost(sim: Sim, g: String, hid: String) -> int:
+	return int(float(GameData.build_cost(g)) * (0.75 if sim.perk(hid) == "industry" else 1.0))
+
+
+static func upgrade_cost(sim: Sim, g: String, hid: String) -> int:
+	return int(float(build_cost(sim, g, hid)) * GameData.BUILD_LEVEL_MULT)
+
+
+## Units per day.
+static func output(sim: Sim, pid: String, pl: Dictionary) -> int:
+	var g: String = pl["b"]
+	var n: int = GameData.TIER_OUTPUT[GameData.tier(g)] + int(pl["lvl"]) - 1
+	if g in GameData.PORTS[pid]["make"]:
+		n += GameData.SIGNATURE_BONUS
+	if sim.perk(pl["owner"]) == "industry":
+		n += 1
+	return n
 
 
 static func count_buildings(sim: Sim, pid: String, hid: String) -> int:
@@ -54,8 +59,14 @@ static func count_buildings(sim: Sim, pid: String, hid: String) -> int:
 	return n
 
 
+## How many buildings `hid` may own in this city: 1 + friendliness level (rivals: 3).
+static func build_limit(sim: Sim, pid: String, hid: String) -> int:
+	if hid != sim.pid():
+		return 2
+	return 1 + sim.friend_level(pid, hid)
+
+
 static func all_buildings(sim: Sim, hid: String) -> Array:
-	## [{port, idx, plot}] for every building `hid` owns.
 	var out := []
 	for pid in GameData.PORT_IDS:
 		var plots: Array = sim.s["ports"][pid]["plots"]
@@ -89,7 +100,6 @@ static func wh_cap(sim: Sim, pid: String, hid: String) -> int:
 
 
 static func wh_add(sim: Sim, pid: String, hid: String, g: String, qty: int) -> int:
-	## Adds up to qty; returns how many fit.
 	var room := wh_cap(sim, pid, hid) - wh_used(sim, pid, hid)
 	var n := mini(qty, room)
 	if n <= 0:
@@ -110,30 +120,23 @@ static func wh_take(sim: Sim, pid: String, hid: String, g: String, qty: int) -> 
 	return n
 
 
-## Rough profit per day if a building runs flat out buying inputs and selling output at this port's market.
-static func est_daily(sim: Sim, pid: String, b: String, hid: String) -> float:
-	var d: Dictionary = GameData.BUILDINGS[b]
-	var v := 0.0
-	for g in d["out"]:
-		if not GameData.trades(pid, g):
-			return -INF
-		v += float(sim.sell_price(pid, g, hid)) * float(d["out"][g])
-	for g in d["in"]:
-		if not GameData.trades(pid, g):
-			return -INF
-		v -= float(sim.buy_price(pid, g, hid)) * float(d["in"][g])
-	return v * rate(sim, pid, b, hid) - float(d["upkeep"]) / 30.0
+## Profit per day if the workshop buys inputs and sells output at this port's market right now.
+static func est_daily(sim: Sim, pid: String, g: String, hid: String, lvl: int = 1) -> float:
+	var v := float(sim.sell_price(pid, g, hid))
+	for k in GameData.GOODS[g].get("recipe", {}):
+		v -= float(sim.buy_price(pid, k, hid)) * float(GameData.GOODS[g]["recipe"][k])
+	var n: int = GameData.TIER_OUTPUT[GameData.tier(g)] + lvl - 1
+	if g in GameData.PORTS[pid]["make"]:
+		n += GameData.SIGNATURE_BONUS
+	return v * float(n) - float(GameData.upkeep_of(g)) / 30.0
 
 
-## Value of one cycle's output at the best price you know of (for UI hints), minus inputs at local prices.
-static func cycle_value_hint(sim: Sim, pid: String, b: String, hid: String) -> float:
-	var d: Dictionary = GameData.BUILDINGS[b]
-	var v := 0.0
-	for g in d["out"]:
-		v += float(GameData.GOODS[g]["base"]) * float(d["out"][g])
-	for g in d["in"]:
-		v -= float(GameData.GOODS[g]["base"]) * float(d["in"][g])
-	return v * rate(sim, pid, b, hid)
+## Value of one unit at base prices minus its inputs at base prices.
+static func margin_hint(g: String) -> int:
+	var v: int = GameData.GOODS[g]["base"]
+	for k in GameData.GOODS[g].get("recipe", {}):
+		v -= int(GameData.GOODS[k]["base"]) * int(GameData.GOODS[g]["recipe"][k])
+	return v
 
 
 # ------------------------------------------------------------------ actions
@@ -142,16 +145,20 @@ static func open_wh(sim: Sim, pid: String, hid: String = "", free: bool = false)
 	if hid == "":
 		hid = sim.pid()
 	if has_wh(sim, pid, hid):
-		return sim._fail("这里已经有你的仓库。")
+		return sim._fail("这里已经有你的商馆。")
 	var h := sim.house(hid)
 	if not free:
-		if h["gold"] < GameData.WH_RENT:
-			return sim._fail("需要 %d 金。" % GameData.WH_RENT)
-		h["gold"] -= GameData.WH_RENT
-		h["month_out"] += GameData.WH_RENT
+		if hid == sim.pid() and sim.rep_level(hid) < 2:
+			return sim._fail("名声达到「船东」（2 级）才能开设商馆。")
+		if h["gold"] < GameData.WH_OPEN:
+			return sim._fail("需要 %d 金。" % GameData.WH_OPEN)
+		h["gold"] -= GameData.WH_OPEN
+		h["month_out"] += GameData.WH_OPEN
 	sim.s["ports"][pid]["whcap"][hid] = GameData.WH_START
 	wh(sim, pid, hid)
-	return {"ok": true, "msg": "在 %s 开设了仓库（容量 %d）。" % [GameData.port_name(pid), GameData.WH_START]}
+	if not free and hid == sim.pid():
+		sim.add_rep(hid, 15)
+	return {"ok": true, "msg": "在 %s 开设了商馆（仓库容量 %d）。" % [GameData.port_name(pid), GameData.WH_START]}
 
 
 static func upgrade_wh(sim: Sim, pid: String, hid: String = "") -> Dictionary:
@@ -159,7 +166,7 @@ static func upgrade_wh(sim: Sim, pid: String, hid: String = "") -> Dictionary:
 		hid = sim.pid()
 	var cap := wh_cap(sim, pid, hid)
 	if cap <= 0:
-		return sim._fail("先开设仓库。")
+		return sim._fail("先开设商馆。")
 	if cap >= GameData.WH_MAX:
 		return sim._fail("仓库已是最大。")
 	var h := sim.house(hid)
@@ -171,32 +178,64 @@ static func upgrade_wh(sim: Sim, pid: String, hid: String = "") -> Dictionary:
 	return {"ok": true, "msg": "仓库扩建到 %d。" % (cap + GameData.WH_STEP)}
 
 
-static func build(sim: Sim, pid: String, i: int, b: String, hid: String = "") -> Dictionary:
-	if hid == "":
-		hid = sim.pid()
+static func can_build(sim: Sim, pid: String, i: int, g: String, hid: String) -> Dictionary:
 	var plots: Array = sim.s["ports"][pid]["plots"]
-	if i < 0 or i >= open_plots(sim, pid):
-		return sim._fail("这块地还没开放，城市繁荣后才能用。")
+	if not GameData.GOODS.has(g):
+		return sim._fail("没有这种货物。")
 	if plots[i] != null:
 		return sim._fail("这块地已经有建筑了。")
-	if not b in buildings_for(pid, i):
-		return sim._fail("%s 上不能建 %s。" % [GameData.TERRAIN[terrain(pid, i)], GameData.BUILDINGS[b]["name"]])
-	var cost := build_cost(sim, b, hid)
-	var h := sim.house(hid)
-	if h["gold"] < cost:
+	if not GameData.plot_fits(pid, i, g):
+		return sim._fail("%s上不能建%s工坊。" % [terrain_name(pid, i), GameData.good_name(g)])
+	if not sim.has_bp(g, hid):
+		var t := GameData.tier(g)
+		return sim._fail(["", "需要这座城的%s地契（城主府）。", "需要%s的工艺图纸（工匠行会）。", "需要%s的秘传图纸。"][t] % GameData.good_name(g))
+	if hid == sim.pid() and sim.rep_level(hid) < 2:
+		return sim._fail("名声达到「船东」（2 级）才能建工坊。")
+	if count_buildings(sim, pid, hid) >= build_limit(sim, pid, hid):
+		return sim._fail("你在这座城最多建 %d 座（提升友好度可以增加）。" % build_limit(sim, pid, hid))
+	var cost := build_cost(sim, g, hid)
+	if sim.house(hid)["gold"] < cost:
 		return sim._fail("需要 %d 金。" % cost)
+	return {"ok": true}
+
+
+static func build(sim: Sim, pid: String, i: int, g: String, hid: String = "") -> Dictionary:
+	if hid == "":
+		hid = sim.pid()
+	var r := can_build(sim, pid, i, g, hid)
+	if not r["ok"]:
+		return r
+	var h := sim.house(hid)
+	var cost := build_cost(sim, g, hid)
 	h["gold"] -= cost
 	h["month_out"] += cost
 	if not has_wh(sim, pid, hid):
 		open_wh(sim, pid, hid, true)
-	var out_mode := "wh"
-	if hid != sim.pid():
-		out_mode = "sell"
-	plots[i] = {"b": b, "owner": hid, "in_mode": "buy" if hid != sim.pid() else "wh", "out_mode": out_mode, "acc": 0.0, "status": "ok"}
-	var msg := "%s 在 %s 建起了%s。" % [GameData.HOUSES[hid]["name"], GameData.port_name(pid), GameData.BUILDINGS[b]["name"]]
-	if hid != sim.pid():
+	var mine := hid == sim.pid()
+	sim.s["ports"][pid]["plots"][i] = {"b": g, "lvl": 1, "owner": hid, "in_mode": "wh" if mine else "buy", "out_mode": "wh" if mine else "sell", "status": "ok"}
+	sim.add_rep(hid, 20)
+	var msg := "%s 在 %s 建起了%s工坊。" % [GameData.HOUSES[hid]["name"], GameData.port_name(pid), GameData.good_name(g)]
+	if not mine:
 		sim._say(msg, "rival")
+	else:
+		sim.add_friend(pid, hid, 30)
 	return {"ok": true, "msg": msg}
+
+
+static func upgrade(sim: Sim, pid: String, i: int) -> Dictionary:
+	var pl = sim.s["ports"][pid]["plots"][i]
+	if pl == null or pl["owner"] != sim.pid():
+		return sim._fail("不是你的建筑。")
+	if int(pl["lvl"]) >= GameData.MAX_BUILD_LEVEL:
+		return sim._fail("工坊已是最高级。")
+	var cost := upgrade_cost(sim, pl["b"], sim.pid())
+	var h := sim.house()
+	if h["gold"] < cost:
+		return sim._fail("需要 %d 金。" % cost)
+	h["gold"] -= cost
+	h["month_out"] += cost
+	pl["lvl"] = int(pl["lvl"]) + 1
+	return {"ok": true, "msg": "%s工坊升到 %d 级，每天产 %d 件。" % [GameData.good_name(pl["b"]), int(pl["lvl"]), output(sim, pid, pl)]}
 
 
 static func set_mode(sim: Sim, pid: String, i: int, key: String, value: String) -> Dictionary:
@@ -204,7 +243,7 @@ static func set_mode(sim: Sim, pid: String, i: int, key: String, value: String) 
 	if pl == null or pl["owner"] != sim.pid():
 		return sim._fail("不是你的建筑。")
 	if key == "out_mode" and value == "lh" and pid != GameData.HOUSES[sim.pid()]["home"]:
-		return sim._fail("只有母港的建筑能直送灯塔工地。")
+		return sim._fail("只有母港的工坊能直送灯塔工地。")
 	pl[key] = value
 	pl["status"] = "ok"
 	return {"ok": true, "msg": "已更新。"}
@@ -217,14 +256,14 @@ static func demolish(sim: Sim, pid: String, i: int) -> Dictionary:
 	var refund := int(float(build_cost(sim, pl["b"], sim.pid())) * 0.3)
 	sim.house()["gold"] += refund
 	sim.s["ports"][pid]["plots"][i] = null
-	return {"ok": true, "msg": "拆除%s，回收 %d 金。" % [GameData.BUILDINGS[pl["b"]]["name"], refund]}
+	return {"ok": true, "msg": "拆除%s工坊，回收 %d 金。" % [GameData.good_name(pl["b"]), refund]}
 
 
-static func buyout_cost(sim: Sim, pid: String, i: int, hid: String = "") -> int:
+static func buyout_cost(sim: Sim, pid: String, i: int) -> int:
 	var pl = sim.s["ports"][pid]["plots"][i]
 	if pl == null:
 		return 0
-	return int(float(GameData.BUILDINGS[pl["b"]]["cost"]) * GameData.BUYOUT_MULT)
+	return int(float(GameData.build_cost(pl["b"])) * float(pl["lvl"]) * GameData.BUYOUT_MULT)
 
 
 static func buyout(sim: Sim, pid: String, i: int, hid: String = "") -> Dictionary:
@@ -233,7 +272,11 @@ static func buyout(sim: Sim, pid: String, i: int, hid: String = "") -> Dictionar
 	var pl = sim.s["ports"][pid]["plots"][i]
 	if pl == null or pl["owner"] == hid:
 		return sim._fail("没有可收购的建筑。")
-	var cost := buyout_cost(sim, pid, i, hid)
+	if not sim.has_bp(pl["b"], hid):
+		return sim._fail("没有%s的图纸，接手了也开不了工。" % GameData.good_name(pl["b"]))
+	if count_buildings(sim, pid, hid) >= build_limit(sim, pid, hid):
+		return sim._fail("你在这座城最多建 %d 座。" % build_limit(sim, pid, hid))
+	var cost := buyout_cost(sim, pid, i)
 	var h := sim.house(hid)
 	if h["gold"] < cost:
 		return sim._fail("需要 %d 金。" % cost)
@@ -241,25 +284,21 @@ static func buyout(sim: Sim, pid: String, i: int, hid: String = "") -> Dictionar
 	var before := sim.patron(pid)
 	h["gold"] -= cost
 	h["month_out"] += cost
-	var comp := float(GameData.BUILDINGS[pl["b"]]["cost"])
+	var comp := float(GameData.build_cost(pl["b"])) * float(pl["lvl"])
 	sim.house(target)["gold"] += comp
 	sim.house(target)["month_in"] += comp
 	pl["owner"] = hid
-	pl["acc"] = 0.0
 	pl["status"] = "ok"
-	if hid == sim.pid():
-		pl["in_mode"] = "buy"
-		pl["out_mode"] = "wh"
-	else:
-		pl["in_mode"] = "buy"
-		pl["out_mode"] = "sell"
+	var mine := hid == sim.pid()
+	pl["in_mode"] = "wh" if mine else "buy"
+	pl["out_mode"] = "wh" if mine else "sell"
 	if not has_wh(sim, pid, hid):
 		open_wh(sim, pid, hid, true)
 	var who: String = GameData.HOUSES[hid]["name"]
-	var msg := "%s 收购了 %s 在 %s 的%s。" % [who, GameData.HOUSES[target]["name"], GameData.port_name(pid), GameData.BUILDINGS[pl["b"]]["name"]]
+	var msg := "%s 收购了 %s 在 %s 的%s工坊。" % [who, GameData.HOUSES[target]["name"], GameData.port_name(pid), GameData.good_name(pl["b"])]
 	if sim.patron(pid) != before and sim.patron(pid) == hid:
 		msg += " %s 成为 %s 港主。" % [who, GameData.port_name(pid)]
-	sim._say(msg, "good" if hid == sim.pid() else ("bad" if target == sim.pid() else "major"))
+	sim._say(msg, "good" if mine else ("bad" if target == sim.pid() else "major"))
 	return {"ok": true, "msg": msg}
 
 
@@ -267,83 +306,74 @@ static func buyout(sim: Sim, pid: String, i: int, hid: String = "") -> Dictionar
 
 static func tick(sim: Sim) -> void:
 	for pid in GameData.PORT_IDS:
-		var plots: Array = sim.s["ports"][pid]["plots"]
-		for i in plots.size():
-			var pl = plots[i]
+		for pl in sim.s["ports"][pid]["plots"]:
 			if pl == null or sim.house(pl["owner"])["bankrupt"]:
 				continue
-			pl["acc"] = minf(float(pl["acc"]) + rate(sim, pid, pl["b"], pl["owner"]), 3.0)
-			var guard := 0
-			while float(pl["acc"]) >= 1.0 and guard < 8:
-				guard += 1
+			var n := output(sim, pid, pl)
+			var made := 0
+			for k in n:
 				if not _cycle(sim, pid, pl):
-					pl["acc"] = minf(float(pl["acc"]), 1.0)
 					break
-				pl["acc"] = float(pl["acc"]) - 1.0
+				made += 1
+			if made > 0:
+				pl["status"] = "ok"
 
 
+## One unit of output. Returns false (and sets status) when it cannot run.
 static func _cycle(sim: Sim, pid: String, pl: Dictionary) -> bool:
-	var d: Dictionary = GameData.BUILDINGS[pl["b"]]
+	var g: String = pl["b"]
+	var recipe: Dictionary = GameData.GOODS[g].get("recipe", {})
 	var hid: String = pl["owner"]
 	var h := sim.house(hid)
-	# 1. check inputs: warehouse first, then the market if allowed
 	var from_wh := {}
 	var to_buy := {}
-	for g in d["in"]:
-		var need: int = d["in"][g]
-		var have := mini(need, int(wh(sim, pid, hid).get(g, 0)))
-		from_wh[g] = have
+	for k in recipe:
+		var need: int = recipe[k]
+		var have := mini(need, int(wh(sim, pid, hid).get(k, 0)))
+		from_wh[k] = have
 		if have < need:
-			if pl["in_mode"] == "buy" and GameData.trades(pid, g):
-				to_buy[g] = need - have
+			if pl["in_mode"] == "buy":
+				to_buy[k] = need - have
 			else:
-				pl["status"] = "缺" + GameData.good_name(g)
+				pl["status"] = "缺" + GameData.good_name(k)
 				return false
 	var buy_cost := 0.0
-	for g in to_buy:
-		var q := sim.quote_buy(pid, g, to_buy[g], hid)
-		if q["qty"] < to_buy[g]:
-			pl["status"] = "本港%s断货" % GameData.good_name(g)
+	for k in to_buy:
+		var q := sim.quote_buy(pid, k, to_buy[k], hid)
+		if q["qty"] < to_buy[k]:
+			pl["status"] = "本港%s断货" % GameData.good_name(k)
 			return false
 		buy_cost += q["cost"]
 	if buy_cost > 0.0 and h["gold"] - buy_cost < 0.0:
 		pl["status"] = "金币不足，买不起原料"
 		return false
-	# 2. where does the output go?
 	var out_mode: String = pl["out_mode"]
-	for g in d["out"]:
-		if out_mode == "lh" and not _lh_needs(sim, hid, g):
-			out_mode = "wh" if hid == sim.pid() else "sell"
-		if out_mode == "sell" and not GameData.trades(pid, g):
-			out_mode = "wh"
-		if out_mode == "wh" and wh_cap(sim, pid, hid) - wh_used(sim, pid, hid) < int(d["out"][g]):
-			if GameData.trades(pid, g) and hid != sim.pid():
-				out_mode = "sell"
-			else:
-				pl["status"] = "仓库已满"
-				return false
-	# 3. run the cycle
-	for g in from_wh:
-		wh_take(sim, pid, hid, g, from_wh[g])
-	for g in to_buy:
-		var q2 := sim.quote_buy(pid, g, to_buy[g], hid)
+	if out_mode == "lh" and not _lh_needs(sim, hid, g):
+		out_mode = "wh" if hid == sim.pid() else "sell"
+	if out_mode == "wh" and wh_cap(sim, pid, hid) - wh_used(sim, pid, hid) < 1:
+		if hid != sim.pid():
+			out_mode = "sell"
+		else:
+			pl["status"] = "仓库已满"
+			return false
+	for k in from_wh:
+		wh_take(sim, pid, hid, k, from_wh[k])
+	for k in to_buy:
+		var q2 := sim.quote_buy(pid, k, to_buy[k], hid)
 		h["gold"] -= q2["cost"]
 		h["month_out"] += q2["cost"]
-		sim.s["ports"][pid]["market"][g]["stock"] -= q2["qty"]
-	for g in d["out"]:
-		var n: int = d["out"][g]
-		match out_mode:
-			"sell":
-				var r := sim.quote_sell(pid, g, n, hid)
-				h["gold"] += r["revenue"]
-				h["month_in"] += r["revenue"]
-				sim.s["ports"][pid]["market"][g]["stock"] += n
-			"lh":
-				var lh: Dictionary = h["lh"]
-				lh["mats"][g] = int(lh["mats"].get(g, 0)) + n
-			_:
-				wh_add(sim, pid, hid, g, n)
-	pl["status"] = "ok"
+		sim.s["ports"][pid]["market"][k]["stock"] -= q2["qty"]
+	match out_mode:
+		"sell":
+			var r := sim.quote_sell(pid, g, 1, hid)
+			h["gold"] += r["revenue"]
+			h["month_in"] += r["revenue"]
+			sim.s["ports"][pid]["market"][g]["stock"] += 1
+		"lh":
+			var lh: Dictionary = h["lh"]
+			lh["mats"][g] = int(lh["mats"].get(g, 0)) + 1
+		_:
+			wh_add(sim, pid, hid, g, 1)
 	return true
 
 
@@ -355,94 +385,119 @@ static func _lh_needs(sim: Sim, hid: String, g: String) -> bool:
 	return need.has(g) and int(lh["mats"].get(g, 0)) < int(need[g])
 
 
+## Monthly upkeep: workshops plus warehouse rent.
 static func upkeep(sim: Sim, hid: String) -> float:
 	var c := 0.0
 	for b in all_buildings(sim, hid):
-		c += float(GameData.BUILDINGS[b["plot"]["b"]]["upkeep"])
+		c += float(GameData.upkeep_of(b["plot"]["b"]))
 	for pid in GameData.PORT_IDS:
 		var cap := wh_cap(sim, pid, hid)
 		if cap > 0:
-			c += float(cap) * 0.5
+			c += float(cap) / 100.0 * float(GameData.WH_RENT_PER_100)
 	return c
-
-
-## Monthly: a city grows when the goods it wants are in good supply, shrinks when they are scarce.
-static func monthly_prosperity(sim: Sim) -> void:
-	for pid in GameData.PORT_IDS:
-		var p: Dictionary = sim.s["ports"][pid]
-		var wants: Array = GameData.PORTS[pid]["want"]
-		var ok := 0
-		for g in wants:
-			var e: Dictionary = p["market"][g]
-			if float(e["stock"]) >= float(e["eq"]) * 0.75:
-				ok += 1
-		var ratio := float(ok) / float(maxi(1, wants.size()))
-		if ratio >= 0.5:
-			p["growth"] = int(p["growth"]) + 1
-		elif ratio < 0.25:
-			p["growth"] = int(p["growth"]) - 1
-		if int(p["growth"]) >= 4 and int(p["prosp"]) < GameData.PROSP_MAX:
-			p["prosp"] = int(p["prosp"]) + 1
-			p["growth"] = 0
-			_apply_demand(sim, pid)
-			sim._say("%s 日渐繁荣（%d 级）：需求变大，开放了新的地块。" % [GameData.port_name(pid), int(p["prosp"])], "major")
-		elif int(p["growth"]) <= -4 and int(p["prosp"]) > 1:
-			p["prosp"] = int(p["prosp"]) - 1
-			p["growth"] = 0
-			_apply_demand(sim, pid)
-			sim._say("%s 因长期短缺而衰落（%d 级）。" % [GameData.port_name(pid), int(p["prosp"])], "bad")
-
-
-## Wanted goods: richer cities consume more, so their equilibrium stock sits lower (higher prices, more volume).
-static func _apply_demand(sim: Sim, pid: String) -> void:
-	var p: Dictionary = sim.s["ports"][pid]
-	var k := 1.0 + 0.12 * float(int(p["prosp"]) - int(GameData.PORTS[pid]["prosp"]))
-	for g in GameData.PORTS[pid]["want"]:
-		var e: Dictionary = p["market"][g]
-		if not e.has("eq0"):
-			e["eq0"] = e["eq"]
-		e["eq"] = float(e["eq0"]) / maxf(0.5, k)
-
-
-## How well a city's wants are being met right now, 0..1 per good.
-static func supply(sim: Sim, pid: String) -> Dictionary:
-	var out := {}
-	for g in GameData.PORTS[pid]["want"]:
-		var e: Dictionary = sim.s["ports"][pid]["market"][g]
-		out[g] = clampf(float(e["stock"]) / (float(e["eq"]) * 0.75), 0.0, 1.0)
-	return out
 
 
 # ------------------------------------------------------------------ rivals
 
-## A rival builds the most profitable building it can afford, preferring its home port.
+## Rivals pick up blueprints as their reputation grows, then build what pays best.
+static func ai_blueprints(sim: Sim, hid: String) -> void:
+	var h := sim.house(hid)
+	var lvl := sim.rep_level(hid)
+	var home: String = GameData.HOUSES[hid]["home"]
+	# the bot player has to buy its home deeds like anyone else
+	if hid == sim.pid():
+		for g in GameData.PORTS[home]["make"]:
+			if GameData.tier(g) == 1 and not sim.has_bp(g, hid) and h["gold"] > GameData.DEED_COST * 4 and sim.deed_ok(home, g)["ok"]:
+				sim.buy_deed(home, g)
+				return
+	# lighthouse materials nobody sells: learn to make them
+	var lh: Dictionary = h["lh"]
+	for st in range(int(lh["stage"]), GameData.LIGHTHOUSE.size()):
+		for g in GameData.LIGHTHOUSE[st]["mats"]:
+			if sim.has_bp(g, hid) or GameData.GOODS[g].get("home", "") != "":
+				continue
+			var t := GameData.tier(g)
+			if t == 2 and lvl >= 3 and h["gold"] > GameData.CRAFT_BP_COST * 3:
+				h["gold"] -= GameData.CRAFT_BP_COST
+				h["bp"][g] = true
+				sim._say("%s 买下了%s的工艺图纸。" % [GameData.HOUSES[hid]["name"], GameData.good_name(g)], "rival")
+				return
+			if t == 3 and lvl >= 4 and h["gold"] > GameData.SECRET_BP_COST * 2:
+				h["gold"] -= GameData.SECRET_BP_COST
+				h["bp"][g] = true
+				sim._say("%s 取得了%s的秘传图纸。" % [GameData.HOUSES[hid]["name"], GameData.good_name(g)], "rival")
+				return
+	if lvl >= 3:
+		# craft blueprints for goods whose main input they already make
+		for g in GameData.GOOD_IDS:
+			if GameData.tier(g) == 2 and not sim.has_bp(g, hid) and GameData.main_input(g) in GameData.PORTS[home]["make"] and h["gold"] > GameData.CRAFT_BP_COST * 3:
+				h["gold"] -= GameData.CRAFT_BP_COST
+				h["bp"][g] = true
+				sim._say("%s 买下了%s的工艺图纸。" % [GameData.HOUSES[hid]["name"], GameData.good_name(g)], "rival")
+				return
+	if lvl >= 4 and h["gold"] > GameData.SECRET_BP_COST * 2:
+		for g in GameData.SECRET_BP_CITY:
+			if sim.has_bp(g, hid):
+				continue
+			# a secret they can actually feed: at least one input they already produce
+			var feed := false
+			for k in GameData.GOODS[g]["recipe"]:
+				if sim.has_bp(k, hid):
+					feed = true
+			if feed:
+				h["gold"] -= GameData.SECRET_BP_COST
+				h["bp"][g] = true
+				sim._say("%s 取得了%s的秘传图纸。" % [GameData.HOUSES[hid]["name"], GameData.good_name(g)], "rival")
+				return
+
+
+## Rich houses raise their workshops a level at a time (a money sink that keeps them competitive).
+static func ai_upgrade(sim: Sim, hid: String, budget: float) -> void:
+	var best := {}
+	var best_lvl := GameData.MAX_BUILD_LEVEL
+	for b in all_buildings(sim, hid):
+		var pl: Dictionary = b["plot"]
+		if int(pl["lvl"]) < best_lvl and upgrade_cost(sim, pl["b"], hid) <= budget:
+			best_lvl = int(pl["lvl"])
+			best = pl
+	if best.is_empty():
+		return
+	var h := sim.house(hid)
+	var cost := upgrade_cost(sim, best["b"], hid)
+	h["gold"] -= cost
+	h["month_out"] += cost
+	best["lvl"] = int(best["lvl"]) + 1
+
+
 static func ai_build(sim: Sim, hid: String, budget: float) -> void:
-	if all_buildings(sim, hid).size() >= 6:
+	if all_buildings(sim, hid).size() >= 8:
 		return
 	var best := {}
 	var best_score := 0.0
 	var home: String = GameData.HOUSES[hid]["home"]
 	for pid in GameData.PORT_IDS:
+		if count_buildings(sim, pid, hid) >= build_limit(sim, pid, hid):
+			continue
 		var plots: Array = sim.s["ports"][pid]["plots"]
-		for i in open_plots(sim, pid):
+		for i in plots.size():
 			if plots[i] != null:
 				continue
-			for b in buildings_for(pid, i):
-				var cost := build_cost(sim, b, hid)
+			for g in goods_for(pid, i):
+				if not sim.has_bp(g, hid):
+					continue
+				var cost := build_cost(sim, g, hid)
 				if cost > budget:
 					continue
-				var daily := est_daily(sim, pid, b, hid)
+				var daily := est_daily(sim, pid, g, hid)
 				var lh_bonus := 0.0
-				if pid == home:
-					for g in GameData.BUILDINGS[b]["out"]:
-						if _lh_needs(sim, hid, g):
-							lh_bonus = float(GameData.GOODS[g]["base"]) * rate(sim, pid, b, hid) * 0.8
+				if pid == home and _lh_needs(sim, hid, g):
+					lh_bonus = float(GameData.GOODS[g]["base"]) * float(GameData.TIER_OUTPUT[GameData.tier(g)]) * 0.8
 				var score := (daily + lh_bonus) * 30.0 / float(cost) * (1.3 if pid == home else 1.0)
-				if score > best_score and score > 0.12:
+				if score > best_score and score > 0.1:
 					best_score = score
-					best = {"port": pid, "idx": i, "b": b}
+					best = {"port": pid, "idx": i, "g": g}
 	if best.is_empty():
 		return
-	var r := build(sim, best["port"], best["idx"], best["b"], hid)
+	var r := build(sim, best["port"], best["idx"], best["g"], hid)
 	if r["ok"] and best["port"] == home:
 		sim.s["ports"][home]["plots"][best["idx"]]["out_mode"] = "lh"

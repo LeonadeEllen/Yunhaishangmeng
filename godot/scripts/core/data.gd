@@ -1,105 +1,101 @@
 class_name GameData
-## Static data tables for the 霞市 vertical slice.
+## Static data tables (design doc v2). All quantities and prices are integers.
 
 const DAYS_MONTH := 30
 const DAYS_YEAR := 360
-const END_YEAR := 10          # storm arrives at the end of year 10
-const END_DAY := END_YEAR * DAYS_YEAR
 const MAX_SHIPS := 4
 const PX_PER_DAY := 60.0      # map pixels a speed-1.0 ship covers per day
 const CRISIS_DAYS := 30
 const LOAN_RATE := 0.02       # per month
 const SEASONS := ["春", "夏", "秋", "冬"]
 
-# tier 0 raw / 1 intermediate / 2 finished. icon = frame in assets/art/<atlas> (default "goods").
+# ------------------------------------------------------------------ goods
+# tier 1 raw / 2 processed / 3 fine. icon = frame in assets/art/<atlas> (default "goods").
+# home = the city that produces it naturally ("" = only players can make it).
+# recipe = inputs per unit of output.
 const GOODS := {
-	"wheat":   {"name": "云麦",   "base": 25,  "tier": 0, "icon": 0},
-	"fruit":   {"name": "甜霞果", "base": 32,  "tier": 0, "icon": 1},
-	"fish":    {"name": "云鱼",   "base": 28,  "tier": 0, "icon": 2},
-	"fiber":   {"name": "云麻",   "base": 30,  "tier": 0, "icon": 4},
-	"ore":     {"name": "玄铁矿", "base": 34,  "tier": 0, "icon": 10},
-	"stone":   {"name": "霞纹石", "base": 32,  "tier": 0, "icon": 11},
-	"crystal": {"name": "燃晶",   "base": 45,  "tier": 0, "icon": 12},
-	"herb":    {"name": "灵参",   "base": 60,  "tier": 0, "icon": 16},
-	"incense": {"name": "香木",   "base": 100, "tier": 0, "icon": 14},
-	"pearl":   {"name": "雾珍珠", "base": 180, "tier": 0, "icon": 13},
-	"canvas":  {"name": "风帆布", "base": 85,  "tier": 1, "icon": 5},
-	"silk":    {"name": "丝云绸", "base": 130, "tier": 1, "icon": 3},
-	"glass":   {"name": "琉璃",   "base": 145, "tier": 1, "icon": 15},
-	"steel":   {"name": "精钢",   "base": 150, "tier": 1, "icon": 9},
-	"elixir":  {"name": "霞露",   "base": 330, "tier": 2, "icon": 17},
-	"lamp":    {"name": "琉璃灯", "base": 400, "tier": 2, "icon": 8},
-	"cannon":  {"name": "云炮",   "base": 470, "tier": 2, "icon": 3, "atlas": "resources"},
+	# tier 1
+	"wheat":   {"name": "云麦",   "tier": 1, "base": 24, "icon": 0,  "home": "muxia"},
+	"fish":    {"name": "云鱼",   "tier": 1, "base": 28, "icon": 2,  "home": "muxia"},
+	"fiber":   {"name": "云麻",   "tier": 1, "base": 30, "icon": 4,  "home": "hongxiao"},
+	"fruit":   {"name": "甜霞果", "tier": 1, "base": 32, "icon": 1,  "home": "chishi"},
+	"stone":   {"name": "霞纹石", "tier": 1, "base": 36, "icon": 11, "home": "chishi"},
+	"timber":  {"name": "云杉木", "tier": 1, "base": 36, "icon": 4,  "atlas": "resources", "home": "tonghe"},
+	"ore":     {"name": "玄铁矿", "tier": 1, "base": 40, "icon": 10, "home": "fengyue"},
+	"cocoon":  {"name": "云蚕茧", "tier": 1, "base": 44, "icon": 6,  "home": "qianqi"},
+	"copper":  {"name": "赤铜矿", "tier": 1, "base": 48, "icon": 12, "home": "tonghe"},
+	"blubber": {"name": "鲸脂",   "tier": 1, "base": 60, "icon": 7,  "home": "xiajing"},
+	"herb":    {"name": "灵参",   "tier": 1, "base": 80, "icon": 16, "home": "cuijing"},
+	"incense": {"name": "香木",   "tier": 1, "base": 120, "icon": 14, "home": "cuijing"},
+	"pearl":   {"name": "雾珍珠", "tier": 1, "base": 130, "icon": 13, "home": "xiajing"},
+	# tier 2
+	"canvas":  {"name": "风帆布", "tier": 2, "base": 84, "icon": 5,  "home": "hongxiao", "recipe": {"fiber": 2}},
+	"silk":    {"name": "丝云绸", "tier": 2, "base": 120, "icon": 3,  "home": "qianqi",   "recipe": {"cocoon": 2}},
+	"smoked":  {"name": "熏鱼",   "tier": 2, "base": 128, "icon": 2,  "home": "",         "recipe": {"fish": 2, "timber": 1}},
+	"wine":    {"name": "霞果酒", "tier": 2, "base": 132, "icon": 6,  "atlas": "resources", "home": "", "recipe": {"fruit": 3}},
+	"brass":   {"name": "铜件",   "tier": 2, "base": 132, "icon": 2,  "atlas": "resources", "home": "", "recipe": {"copper": 2}},
+	"glass":   {"name": "琉璃",   "tier": 2, "base": 150, "icon": 15, "home": "",         "recipe": {"stone": 2, "timber": 1}},
+	"steel":   {"name": "精钢",   "tier": 2, "base": 160, "icon": 9,  "home": "fengyue",  "recipe": {"ore": 2, "timber": 1}},
+	"oil":     {"name": "灯油",   "tier": 2, "base": 164, "icon": 12, "home": "",         "recipe": {"blubber": 2}},
+	# tier 3
+	"rigging": {"name": "飞艇帆具", "tier": 3, "base": 330, "icon": 9,  "atlas": "resources", "home": "", "recipe": {"canvas": 3, "steel": 1}},
+	"astro":   {"name": "星盘",     "tier": 3, "base": 330, "icon": 11, "atlas": "resources", "home": "", "recipe": {"brass": 2, "glass": 1}},
+	"brocade": {"name": "云锦",     "tier": 3, "base": 340, "icon": 8,  "atlas": "resources", "home": "", "recipe": {"silk": 2, "pearl": 1}},
+	"balm":    {"name": "香膏",     "tier": 3, "base": 350, "icon": 7,  "atlas": "resources", "home": "", "recipe": {"incense": 1, "oil": 1, "glass": 1}},
+	"elixir":  {"name": "霞露",     "tier": 3, "base": 355, "icon": 17, "home": "",         "recipe": {"herb": 2, "wine": 1, "glass": 1}},
+	"lamp":    {"name": "琉璃灯",   "tier": 3, "base": 360, "icon": 8,  "home": "",         "recipe": {"glass": 1, "brass": 1, "oil": 1}},
+	"cannon":  {"name": "云炮",     "tier": 3, "base": 360, "icon": 3,  "atlas": "resources", "home": "", "recipe": {"steel": 2, "brass": 1}},
+	"feast":   {"name": "珍馐宴盒", "tier": 3, "base": 370, "icon": 15, "atlas": "resources", "home": "", "recipe": {"smoked": 2, "wine": 1, "herb": 1}},
 }
-const GOOD_IDS := ["wheat", "fruit", "fish", "fiber", "ore", "stone", "crystal", "herb", "incense", "pearl",
-	"canvas", "silk", "glass", "steel", "elixir", "lamp", "cannon"]
-const TIER_NAMES := ["原料", "半成品", "成品"]
+const GOOD_IDS := ["wheat", "fish", "fiber", "fruit", "stone", "timber", "ore", "cocoon", "copper", "blubber", "herb", "incense", "pearl",
+	"canvas", "silk", "smoked", "wine", "brass", "glass", "steel", "oil",
+	"rigging", "astro", "brocade", "balm", "elixir", "lamp", "cannon", "feast"]
+const TIER_NAMES := ["", "原料", "加工品", "精品"]
+const TIER_OUTPUT := [0, 4, 2, 1]          # units per day for a level-1 workshop
+const TIER_BUILD_COST := [0, 5000, 11000, 20000]
+const TIER_UPKEEP := [0, 150, 280, 420]    # per month
+const BUILD_LEVEL_MULT := 0.6              # upgrade cost = build cost × this, per level
+const MAX_BUILD_LEVEL := 3
+const SIGNATURE_BONUS := 1                 # +1 unit/day when a workshop makes the city's own signature good
 
-# Plot terrain: decides which buildings a plot accepts.
-const TERRAIN := {
-	"field": "麦田地", "orchard": "果园地", "fishery": "渔场", "hemp": "麻田地", "mine": "铁矿脉",
-	"quarry": "霞纹石场", "crystal": "燃晶矿脉", "pearlbed": "珠场", "forest": "香木林", "herbs": "参园地",
-	"workshop": "工坊地",
-}
+# blueprints: tier 1 = land deed (bought at the producing city's hall, needs friendliness 2);
+# tier 2 = craft blueprint (guild, needs reputation level 3 and 100 units of the main input handled);
+# tier 3 = secret blueprint (one specific guild, needs reputation level 4). Prices below.
+const DEED_COST := 3000
+const CRAFT_BP_COST := 8000
+const SECRET_BP_COST := 36000
+const SECRET_BP_CITY := {"rigging": "hongxiao", "astro": "tonghe", "brocade": "qianqi", "balm": "cuijing",
+	"elixir": "cuijing", "lamp": "chishi", "cannon": "fengyue", "feast": "muxia"}
+const CRAFT_HANDLED := 100
 
-# Buildings. One cycle consumes `in` and makes `out`; `rate` = cycles per day.
-const BUILDINGS := {
-	"farm":       {"name": "麦田",   "plot": "field",    "in": {},                                  "out": {"wheat": 1},   "rate": 4.0, "cost": 4000,  "upkeep": 120},
-	"orchard":    {"name": "果园",   "plot": "orchard",  "in": {},                                  "out": {"fruit": 1},   "rate": 3.0, "cost": 4500,  "upkeep": 120},
-	"fishery":    {"name": "渔场",   "plot": "fishery",  "in": {},                                  "out": {"fish": 1},    "rate": 4.0, "cost": 4500,  "upkeep": 140},
-	"hemp":       {"name": "麻田",   "plot": "hemp",     "in": {},                                  "out": {"fiber": 1},   "rate": 4.0, "cost": 4000,  "upkeep": 120},
-	"mine":       {"name": "铁矿",   "plot": "mine",     "in": {},                                  "out": {"ore": 1},     "rate": 4.0, "cost": 6000,  "upkeep": 200},
-	"quarry":     {"name": "石场",   "plot": "quarry",   "in": {},                                  "out": {"stone": 1},   "rate": 4.0, "cost": 5500,  "upkeep": 180},
-	"crystal":    {"name": "晶矿",   "plot": "crystal",  "in": {},                                  "out": {"crystal": 1}, "rate": 3.0, "cost": 7000,  "upkeep": 220},
-	"herbs":      {"name": "参园",   "plot": "herbs",    "in": {},                                  "out": {"herb": 1},    "rate": 2.0, "cost": 6000,  "upkeep": 160},
-	"grove":      {"name": "香林",   "plot": "forest",   "in": {},                                  "out": {"incense": 1}, "rate": 1.5, "cost": 8000,  "upkeep": 200},
-	"pearlbed":   {"name": "珠场",   "plot": "pearlbed", "in": {},                                  "out": {"pearl": 1},   "rate": 1.0, "cost": 10000, "upkeep": 260},
-	"loom":       {"name": "帆布坊", "plot": "workshop", "in": {"fiber": 2},                        "out": {"canvas": 1},  "rate": 2.0, "cost": 8000,  "upkeep": 220},
-	"silkworks":  {"name": "绸坊",   "plot": "workshop", "in": {"fiber": 2, "fruit": 1},            "out": {"silk": 1},    "rate": 1.5, "cost": 10000, "upkeep": 260},
-	"forge":      {"name": "锻炉",   "plot": "workshop", "in": {"ore": 2, "crystal": 1},            "out": {"steel": 1},   "rate": 2.0, "cost": 12000, "upkeep": 320},
-	"kiln":       {"name": "琉璃窑", "plot": "workshop", "in": {"stone": 2, "crystal": 1},          "out": {"glass": 1},   "rate": 2.0, "cost": 12000, "upkeep": 320},
-	"lampworks":  {"name": "灯坊",   "plot": "workshop", "in": {"glass": 1, "steel": 1},            "out": {"lamp": 1},    "rate": 1.0, "cost": 16000, "upkeep": 380},
-	"distillery": {"name": "霞露坊", "plot": "workshop", "in": {"herb": 1, "fruit": 1, "glass": 1}, "out": {"elixir": 1},  "rate": 1.0, "cost": 16000, "upkeep": 380},
-	"foundry":    {"name": "炮坊",   "plot": "workshop", "in": {"steel": 2, "crystal": 1},          "out": {"cannon": 1},  "rate": 0.6, "cost": 20000, "upkeep": 420},
-}
-const BUILDING_IDS := ["farm", "orchard", "fishery", "hemp", "mine", "quarry", "crystal", "herbs", "grove", "pearlbed",
-	"loom", "silkworks", "forge", "kiln", "lampworks", "distillery", "foundry"]
-const SIGNATURE_BONUS := 1.25   # output multiplier when a building makes the city's signature good
-const WH_START := 200           # warehouse capacity when first opened
-const WH_STEP := 200
-const WH_MAX := 1000
-const WH_RENT := 2000
-const WH_UPGRADE := 3000
-const PROSP_MAX := 5
-
-# island = frame index in assets/art/map_islands; pos in map pixels (map is 1600 x 1000)
-# make: cheap here (also what the city's own folk produce); want: dear here; extra: also traded.
-# plots: in unlock order; a city opens 2 + prosperity of them.
+# ------------------------------------------------------------------ cities
+# make: the 2 goods produced here naturally (cheap, plentiful). want: standing demand (dear).
+# plots: 7 per city; a raw good id = land for that good, "workshop" = any processed/fine good.
 const PORTS := {
-	"qianqi":   {"name": "千旗市", "pos": Vector2(820, 520), "island": 2, "make": ["silk", "lamp"], "want": ["wheat", "pearl", "elixir", "fish"], "extra": ["glass", "steel"],
-		"signature": "lamp", "prosp": 3, "plots": ["workshop", "workshop", "field", "workshop", "workshop", "workshop", "field"],
+	"qianqi":   {"name": "千旗市", "pos": Vector2(820, 520),  "island": 2, "make": ["cocoon", "silk"],   "want": ["wheat", "fish", "wine", "lamp"],
+		"plots": ["cocoon", "workshop", "workshop", "cocoon", "workshop", "workshop", "workshop"],
 		"desc": "霞市的枢纽，绸棚与红灯笼连成一片。富商云集，什么好东西都吃得下。"},
-	"hongxiao": {"name": "红绡渡", "pos": Vector2(900, 180), "island": 4, "make": ["fiber", "canvas"], "want": ["lamp", "fish", "fruit"], "extra": ["silk"],
-		"signature": "canvas", "prosp": 2, "plots": ["hemp", "workshop", "hemp", "workshop", "hemp", "orchard", "workshop"],
+	"hongxiao": {"name": "红绡渡", "pos": Vector2(900, 180),  "island": 4, "make": ["fiber", "canvas"],   "want": ["fish", "fruit", "oil"],
+		"plots": ["fiber", "fiber", "workshop", "fiber", "workshop", "workshop", "fiber"],
 		"desc": "织坊临风而建，帆布从崖边一路晾到云里。云麻田一直铺到云边。"},
-	"muxia":    {"name": "暮霞港", "pos": Vector2(470, 470), "island": 5, "make": ["fish", "wheat"], "want": ["steel", "silk", "canvas"], "extra": ["fruit", "herb"],
-		"signature": "fish", "prosp": 2, "plots": ["fishery", "field", "fishery", "workshop", "field", "fishery", "herbs"],
+	"muxia":    {"name": "暮霞港", "pos": Vector2(470, 470),  "island": 5, "make": ["fish", "wheat"],     "want": ["steel", "canvas", "silk"],
+		"plots": ["fish", "wheat", "fish", "workshop", "wheat", "fish", "workshop"],
 		"desc": "渔艇傍晚归港，整片云海被染成橘红。云鱼和云麦养活了半个霞市。"},
-	"xiajing":  {"name": "霞鲸台", "pos": Vector2(420, 190), "island": 3, "make": ["pearl", "fruit"], "want": ["canvas", "lamp", "wheat"], "extra": ["elixir", "herb"],
-		"signature": "pearl", "prosp": 2, "plots": ["orchard", "pearlbed", "orchard", "workshop", "pearlbed", "orchard", "workshop"],
-		"desc": "云鲸迁徙的必经之地，采珠人在雾里潜行。霞果园沿着鲸骨台阶层层而上。"},
-	"fengyue":  {"name": "风月坞", "pos": Vector2(660, 300), "island": 1, "make": ["ore", "steel"], "want": ["fruit", "incense", "wheat", "crystal"], "extra": ["cannon"],
-		"signature": "steel", "prosp": 2, "plots": ["mine", "workshop", "mine", "workshop", "workshop", "mine", "quarry"],
+	"xiajing":  {"name": "霞鲸台", "pos": Vector2(420, 190),  "island": 3, "make": ["pearl", "blubber"],  "want": ["wheat", "canvas", "incense"],
+		"plots": ["pearl", "blubber", "pearl", "workshop", "blubber", "workshop", "pearl"],
+		"desc": "云鲸迁徙的必经之地，采珠人在雾里潜行，熬鲸脂的烟整日不散。"},
+	"fengyue":  {"name": "风月坞", "pos": Vector2(660, 300),  "island": 1, "make": ["ore", "steel"],      "want": ["wheat", "fruit", "smoked", "timber"],
+		"plots": ["ore", "workshop", "ore", "workshop", "ore", "workshop", "workshop"],
 		"desc": "锻炉日夜不熄，玄铁矿从山腹里一车车拉出来。工匠只认现钱。"},
-	"cuijing":  {"name": "翠鲸岛", "pos": Vector2(1250, 330), "island": 7, "make": ["incense", "herb", "elixir"], "want": ["steel", "wheat", "glass"], "extra": ["fruit"],
-		"signature": "elixir", "prosp": 2, "plots": ["forest", "herbs", "workshop", "forest", "herbs", "orchard", "workshop"],
-		"desc": "林木蔽天的岛屿，香木在树心里慢慢结成。岛民用灵参酿出霞露。"},
-	"tonghe":   {"name": "铜鹤矶", "pos": Vector2(1300, 720), "island": 6, "make": ["crystal", "cannon"], "want": ["fish", "pearl", "steel", "fiber"], "extra": ["ore", "canvas"],
-		"signature": "cannon", "prosp": 2, "plots": ["crystal", "workshop", "crystal", "workshop", "mine", "crystal", "workshop"],
-		"desc": "铜鹤风车守着港口，燃晶矿脉在岩缝里发着蓝光。船坞的号子从不停歇。"},
-	"chishi":   {"name": "赤石矶", "pos": Vector2(850, 830), "island": 0, "make": ["stone", "glass", "wheat"], "want": ["silk", "fiber", "crystal"], "extra": ["lamp"],
-		"signature": "glass", "prosp": 2, "plots": ["quarry", "workshop", "field", "quarry", "workshop", "quarry", "field"],
-		"desc": "赤色岩壁里藏着霞纹石，琉璃窑的火光彻夜映红山崖。"},
+	"cuijing":  {"name": "翠鲸岛", "pos": Vector2(1250, 330), "island": 7, "make": ["incense", "herb"],   "want": ["steel", "wheat", "glass"],
+		"plots": ["incense", "herb", "workshop", "incense", "herb", "workshop", "workshop"],
+		"desc": "林木蔽天的岛屿，香木在树心里慢慢结成，参园藏在雾里。"},
+	"tonghe":   {"name": "铜鹤矶", "pos": Vector2(1300, 720), "island": 6, "make": ["copper", "timber"],  "want": ["fish", "canvas", "steel", "wine"],
+		"plots": ["copper", "timber", "workshop", "copper", "timber", "workshop", "workshop"],
+		"desc": "铜鹤风车守着港口，赤铜矿脉在岩缝里发着红光。船坞的号子从不停歇。"},
+	"chishi":   {"name": "赤石矶", "pos": Vector2(850, 830),  "island": 0, "make": ["stone", "fruit"],    "want": ["silk", "fiber", "brass"],
+		"plots": ["stone", "fruit", "workshop", "stone", "fruit", "workshop", "workshop"],
+		"desc": "赤色岩壁里藏着霞纹石，梯田上的霞果一到秋天就红透山崖。"},
 }
 const PORT_IDS := ["qianqi", "hongxiao", "muxia", "xiajing", "fengyue", "cuijing", "tonghe", "chishi"]
 
@@ -107,31 +103,40 @@ const PATRON_FEE := 1.03      # non-patrons pay this much more when buying at a 
 const BUYOUT_MULT := 1.6      # price of buying a rival's building, vs. its build cost
 const MAX_CONTRACTS := 3
 
+# friendliness (per city per house): points → level 0..5
+const FRIEND_LEVELS := [0, 100, 300, 700, 1500, 3000]
+const FRIEND_NAMES := ["陌生", "面熟", "相识", "信赖", "座上宾", "荣誉市民"]
+const DONATION := 2000        # one donation at the city hall: +60 friend points
+const DONATION_FRIEND := 60
 
-static func good_name(g: String) -> String:
-	return GOODS[g]["name"]
+# reputation (per house): points → level 1..6
+const REP_LEVELS := [0, 150, 600, 1500, 3500, 7000]
+const REP_NAMES := ["行商", "船东", "商董", "行首", "总商", "盟主候选"]
+const REP_UNLOCK := [
+	"最多 2 艘船",
+	"可以开设商馆、建一阶工坊",
+	"可以购买二阶工艺图纸",
+	"船队上限 4 艘，可以获得三阶秘传图纸",
+	"城主级委托，可以建灯塔灯廊",
+	"可以建灯塔灯冠",
+]
+const REP_MAX_SHIPS := [2, 2, 3, 4, 4, 4]
 
+# warehouses (商馆)
+const WH_OPEN := 2000
+const WH_START := 200
+const WH_STEP := 200
+const WH_MAX := 1000
+const WH_UPGRADE := 3000
+const WH_RENT_PER_100 := 50   # per month
 
-static func port_name(p: String) -> String:
-	return PORTS[p]["name"]
-
-
-static func trades(p: String, g: String) -> bool:
-	var d: Dictionary = PORTS[p]
-	return g in d["make"] or g in d["want"] or g in d["extra"]
-
-
-static func traded_goods(p: String) -> Array:
-	return GOOD_IDS.filter(func(g): return trades(p, g))
-
-
-# sprite = frame index in assets/art/ships
+# ------------------------------------------------------------------ ships
 const SHIPS := {
 	"survey":    {"name": "测绘艇",   "price": 6000,  "cargo": 30,  "speed": 1.35, "fuel_day": 6,  "wage": 300,  "sprite": 0},
 	"freighter": {"name": "货艇",     "price": 12000, "cargo": 80,  "speed": 1.0,  "fuel_day": 9,  "wage": 600,  "sprite": 2},
 	"galleon":   {"name": "盖伦飞艇", "price": 26000, "cargo": 160, "speed": 0.85, "fuel_day": 14, "wage": 1100, "sprite": 3},
 }
-const FUEL_PRICE := 12
+const FUEL_PRICE := 12   # supplies cost per fuel_day unit
 
 const HOUSES := {
 	"lamp":  {"name": "灯油行会", "leader": "霍照野", "home": "qianqi",  "gold": 12000, "emblem": 0, "portrait": 0, "color": Color("b08a3e"),
@@ -139,17 +144,81 @@ const HOUSES := {
 	"iron":  {"name": "铁誓舰团", "leader": "韦朔",   "home": "tonghe",  "gold": 12000, "emblem": 1, "portrait": 1, "color": Color("5b7186"),
 		"perk": "ships", "perk_text": "购买飞艇便宜 20%", "pitch": "铜鹤矶的船坞世家。船多路广，靠规模取胜。"},
 	"tower": {"name": "白塔议士", "leader": "殷望舒", "home": "xiajing", "gold": 12000, "emblem": 2, "portrait": 2, "color": Color("8e8a7a"),
-		"perk": "industry", "perk_text": "建筑便宜 25%，产量 +15%", "pitch": "霞鲸台的议士们擅长投资产业，慢热但后劲足。"},
+		"perk": "industry", "perk_text": "工坊便宜 25%，每天多产 1 件", "pitch": "霞鲸台的议士们擅长投资产业，慢热但后劲足。"},
 }
 const HOUSE_IDS := ["lamp", "iron", "tower"]
 const PLAYER := "lamp"
 
 const LIGHTHOUSE := [
-	{"name": "基座", "gold": 40000,  "mats": {"stone": 120, "steel": 60}, "days": 90, "sprite": 1},
-	{"name": "灯廊", "gold": 100000, "mats": {"glass": 100, "canvas": 80}, "days": 120, "sprite": 3},
-	{"name": "灯冠", "gold": 220000, "mats": {"lamp": 50, "elixir": 40, "pearl": 40}, "days": 180, "sprite": 6},
+	{"name": "基座", "gold": 40000,  "mats": {"stone": 120, "steel": 60}, "days": 120, "sprite": 1, "rep": 1},
+	{"name": "灯廊", "gold": 300000, "mats": {"glass": 160, "canvas": 120}, "days": 240, "sprite": 3, "rep": 5},
+	{"name": "灯冠", "gold": 1500000, "mats": {"lamp": 100, "elixir": 80, "pearl": 120}, "days": 360, "sprite": 6, "rep": 6},
 ]
 
+
+static func good_name(g: String) -> String:
+	return GOODS[g]["name"]
+
+
+static func port_name(p: String) -> String:
+	if not PORTS.has(p):
+		push_warning("port_name: unknown port '%s'" % p)
+		return "云海"
+	return PORTS[p]["name"]
+
+
+static func tier(g: String) -> int:
+	return GOODS[g]["tier"]
+
+
+static func icon_of(g: String) -> Texture2D:
+	return UiKit.sprite(GOODS[g].get("atlas", "goods"), GOODS[g]["icon"])
+
+
+static func trades(_p: String, _g: String) -> bool:
+	return true   # every exchange trades every good (v2); kept for call sites
+
+
+static func traded_goods(_p: String) -> Array:
+	return GOOD_IDS
+
+
+static func build_cost(g: String) -> int:
+	return TIER_BUILD_COST[tier(g)]
+
+
+static func upkeep_of(g: String) -> int:
+	return TIER_UPKEEP[tier(g)]
+
+
+static func plot_fits(p: String, i: int, g: String) -> bool:
+	var t: String = PORTS[p]["plots"][i]
+	return t == g if tier(g) == 1 else t == "workshop"
+
+
+static func main_input(g: String) -> String:
+	var r: Dictionary = GOODS[g].get("recipe", {})
+	var best := ""
+	for k in r:
+		if best == "" or int(r[k]) > int(r[best]):
+			best = k
+	return best
+
+
+static func rep_level(points: int) -> int:
+	var lvl := 1
+	for i in REP_LEVELS.size():
+		if points >= REP_LEVELS[i]:
+			lvl = i + 1
+	return lvl
+
+
+static func friend_level(points: int) -> int:
+	var lvl := 0
+	for i in FRIEND_LEVELS.size():
+		if points >= FRIEND_LEVELS[i]:
+			lvl = i
+	return lvl
 
 
 static func distance(a: String, b: String) -> float:
