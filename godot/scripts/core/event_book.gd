@@ -105,8 +105,9 @@ static func maybe_trigger(sim: Sim) -> void:
 		_open(sim, STORY[story])
 		return
 	if s.has("sailed"):
+		var mult := float(s["sailed"])
 		s.erase("sailed")
-		if int(s["day"]) > 60 and sim.rng.randf() < GameData.ENCOUNTER_CHANCE and sim.fleet_cargo_used(sim.flagship()) > 0:
+		if int(s["day"]) > 60 and sim.rng.randf() < GameData.ENCOUNTER_CHANCE * mult and sim.fleet_cargo_used(sim.flagship()) > 0:
 			sim.start_encounter("pirates")
 			return
 	if s.has("arrived"):
@@ -168,8 +169,10 @@ static func resolve(sim: Sim, choice: int) -> Dictionary:
 			if fl["cargo"][g]["qty"] <= 0:
 				fl["cargo"].erase(g)
 	if fx.has("intel"):
-		for pid in GameData.PORT_IDS:
+		for pid in sim.open_ports():
 			sim._update_intel(pid)
+	if fx.has("explore"):
+		sim.open_east()
 	if fx.has("stock"):
 		var m: Dictionary = sim.s["ports"][fx["stock"][0]]["market"][fx["stock"][1]]
 		m["stock"] = maxf(1.0, m["stock"] + float(fx["stock"][2]))

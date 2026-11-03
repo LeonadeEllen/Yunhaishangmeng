@@ -154,23 +154,10 @@ func new_game(seed_value: int = 0, player: String = "lamp", difficulty: int = 1)
 		"contracts": [], "next_contract_id": 1,
 		"encounter": null, "battle": null, "battle_result": null,
 		"crew": {}, "roam": {"port": "", "until": 0},
+		"explore": {"open": false, "found": {}}, "discovery": null,
 	}
 	for pid in GameData.PORT_IDS:
-		var p: Dictionary = GameData.PORTS[pid]
-		var m := {}
-		for g in GameData.GOOD_IDS:
-			var eq := EQ_NEUTRAL
-			if GameData.GOODS[g]["home"] == "":
-				eq = EQ_SCARCE[GameData.tier(g)]
-			if g in p["make"]:
-				eq = NEUTRAL_EQ * MAKE_EQ
-			elif g in p["want"]:
-				eq *= WANT_EQ
-			if g in p["make"] or g in p["want"]:
-				eq *= rng.randf_range(0.8, 1.25)   # every run has its own strong and weak routes
-			m[g] = {"stock": eq * rng.randf_range(0.85, 1.15), "eq": eq}
-		s["ports"][pid] = {"market": m, "friend": {}}
-		Industry.init_port(self, pid)
+		_init_port(pid)
 	for hid in GameData.HOUSE_IDS:
 		var h: Dictionary = GameData.HOUSES[hid]
 		s["houses"][hid] = {
@@ -187,6 +174,25 @@ func new_game(seed_value: int = 0, player: String = "lamp", difficulty: int = 1)
 	for pid in GameData.PORT_IDS:
 		s["intel"][pid] = null
 	_update_intel(GameData.HOUSES[pid()]["home"])
+
+
+func _init_port(pid: String) -> void:
+	var p: Dictionary = GameData.PORTS[pid]
+	var m := {}
+	for g in GameData.GOOD_IDS:
+		var eq := EQ_NEUTRAL
+		if GameData.GOODS[g]["home"] == "":
+			eq = EQ_SCARCE[GameData.tier(g)]
+		if g in p["make"]:
+			eq = NEUTRAL_EQ * MAKE_EQ
+		elif g in p["want"]:
+			eq *= WANT_EQ
+		if g in p["make"] or g in p["want"]:
+			eq *= rng.randf_range(0.8, 1.25)   # every run has its own strong and weak routes
+		m[g] = {"stock": eq * rng.randf_range(0.85, 1.15), "eq": eq}
+	s["ports"][pid] = {"market": m, "friend": {}}
+	Industry.init_port(self, pid)
+	s["intel"][pid] = null
 
 
 func _add_ship(hid: String, type: String, port: String, ship_name: String = "") -> Dictionary:
@@ -715,8 +721,11 @@ func depart(ship_id: int, dest: String) -> Dictionary:
 	var sh := ship(ship_id)
 	if sh.is_empty() or not docked(sh):
 		return _fail("飞艇不在港口。")
-	if dest == sh["port"] or not GameData.PORTS.has(dest):
+	if dest == sh["port"]:
 		return _fail("目的地无效。")
+	var ok := sail_ok(sh, dest)
+	if not ok["ok"]:
+		return ok
 	if in_fleet(sh):
 		return _fail("%s 随旗舰队行动。" % sh["name"])
 	var h := house(sh["owner"])
@@ -733,7 +742,8 @@ func depart(ship_id: int, dest: String) -> Dictionary:
 		o["arrive"] = s["day"] + days
 		o["port"] = ""
 	if sh["owner"] == pid() and sh["flagship"]:
-		s["sailed"] = true
+		# pirates are thicker in the east (and around the strait)
+		s["sailed"] = GameData.EAST_ENCOUNTER if (GameData.region_of(sh["from"]) == 2 or GameData.region_of(dest) == 2) else 1.0
 	var n := fleet_ships(sh).size()
 	return {"ok": true, "msg": "%s%s 起航前往 %s，预计 %d 天，补给 %d 金。" % [sh["name"], ("等 %d 艘" % n) if n > 1 else "", GameData.port_name(dest), days, fc]}
 
@@ -887,7 +897,7 @@ func repay(amount: int) -> Dictionary:
 func deed_ok(port: String, good: String, hid: String = "") -> Dictionary:
 	if hid == "":
 		hid = pid()
-	if GameData.tier(good) != 1 or GameData.GOODS[good]["home"] != port:
+	if GameData.tier(good) != 1 or not good in GameData.PORTS[port]["make"]:
 		return _fail("%s 不出产%s。" % [GameData.port_name(port), GameData.good_name(good)])
 	if has_bp(good, hid):
 		return _fail("你已经有这份地契。")
@@ -989,7 +999,8 @@ func open_contracts(port: String = "") -> Array:
 
 
 func _post_contract() -> void:
-	var port: String = GameData.PORT_IDS[rng.randi() % GameData.PORT_IDS.size()]
+	var open := open_ports()
+	var port: String = open[rng.randi() % open.size()]
 	var choices: Array = GameData.traded_goods(port).filter(func(g): return not g in GameData.PORTS[port]["make"])
 	var g: String = choices[rng.randi() % choices.size()]
 	for c in s["contracts"]:
@@ -1236,7 +1247,7 @@ func buy_intel() -> Dictionary:
 		return _fail("需要 400 金。")
 	h["gold"] -= 400
 	h["month_out"] += 400
-	for pid in GameData.PORT_IDS:
+	for pid in open_ports():
 		_update_intel(pid)
 	return {"ok": true, "msg": "酒馆的消息贩子带来了全部港口的最新行情。"}
 
@@ -1482,13 +1493,196 @@ func _crew_monthly() -> void:
 		for port in s["hero"]["visited"]:
 			_update_intel(port)
 		if spec_bonus("rumours") >= 1.5:
-			for port in GameData.PORT_IDS:
+			for port in open_ports():
 				_update_intel(port)
 	# the foreign merchant drifts between taverns from the second year on
 	var day: int = s["day"]
 	if day >= GameData.DAYS_YEAR and not s["crew"].has("helan") and int(s["roam"]["until"]) < day and rng.randf() < 0.35:
-		s["roam"] = {"port": GameData.PORT_IDS[rng.randi() % GameData.PORT_IDS.size()], "until": day + 60}
+		s["roam"] = {"port": GameData.WEST_IDS[rng.randi() % GameData.WEST_IDS.size()], "until": day + 60}
 		_say("传闻：一位语言不通的异乡商人在 %s 的酒馆落脚。" % GameData.port_name(s["roam"]["port"]), "info")
+
+
+# ---------------------------------------------------------------- exploration (the eastern fog)
+
+## Ports anyone can sail to: the west, plus eastern cities the player has found.
+func open_ports() -> Array:
+	var out: Array = GameData.WEST_IDS.duplicate()
+	for pid in GameData.EAST_IDS:
+		if s["explore"]["found"].has(pid):
+			out.append(pid)
+	return out
+
+
+func port_open(pid: String) -> bool:
+	return GameData.PORTS.has(pid) and (GameData.region_of(pid) == 1 or s["explore"]["found"].has(pid))
+
+
+func explore_open() -> bool:
+	return bool(s["explore"]["open"])
+
+
+func spot_found(sid: String) -> bool:
+	return s["explore"]["found"].has(sid)
+
+
+## How far into the fog a discovery lets you see.
+func sight() -> float:
+	var f := 1.0 + 0.25 * spec_bonus("survey")
+	for sh in ships_of(pid()):
+		if sh["type"] == "survey":
+			f += 0.15
+			break
+	return GameData.SIGHT * f
+
+
+## Points already found: fog is clear around them.
+func clear_points() -> Array:
+	var out := []
+	if not explore_open():
+		return out
+	for sid in s["explore"]["found"]:
+		out.append(GameData.pos_of(sid))
+	return out
+
+
+## A point you can see (and sail to) but have not been to yet.
+func spot_seen(sid: String) -> bool:
+	if not explore_open() or not GameData.SPOTS.has(sid):
+		return false
+	if spot_found(sid):
+		return true
+	if sid == "fengxi":
+		return true
+	var p := GameData.pos_of(sid)
+	var r := sight()
+	for c in clear_points():
+		if p.distance_to(c) <= r:
+			return true
+	return false
+
+
+func seen_spots() -> Array:
+	return GameData.SPOT_IDS.filter(func(sid): return spot_seen(sid) and not spot_found(sid))
+
+
+func found_spots() -> Array:
+	return GameData.SPOT_IDS.filter(func(sid): return spot_found(sid))
+
+
+## May this ship sail to dest? Ports must be charted; fog points must be seen, and only the
+## protagonist's flagship goes exploring.
+func sail_ok(sh: Dictionary, dest: String) -> Dictionary:
+	if port_open(dest):
+		return {"ok": true}
+	if GameData.PORTS.has(dest) and not GameData.SPOTS.has(dest):
+		return _fail("海图上还没有这座城。")
+	if GameData.SPOTS.has(dest):
+		if sh["owner"] != pid() or not sh["flagship"]:
+			return _fail("只有旗舰能去探索。")
+		if not spot_seen(dest):
+			return _fail("雾太厚，还看不见那里。")
+		if spot_found(dest):
+			return _fail("那里已经探过了。")
+		return {"ok": true}
+	return _fail("目的地无效。")
+
+
+func expedition_ok() -> Dictionary:
+	if explore_open():
+		return _fail("通往东云域的航路已经画在海图上了。")
+	if rep_level() < GameData.EXPEDITION_REP:
+		return _fail("探险队只接受名声「%s」以上商会的赞助。" % GameData.REP_NAMES[GameData.EXPEDITION_REP - 1])
+	if house()["gold"] < GameData.EXPEDITION_COST:
+		return _fail("需要 %d 金。" % GameData.EXPEDITION_COST)
+	return {"ok": true}
+
+
+## Pay for an expedition east: the strait appears on the chart, and the fog beyond it can be explored.
+func sponsor_expedition() -> Dictionary:
+	var r := expedition_ok()
+	if not r["ok"]:
+		return r
+	var h := house()
+	h["gold"] -= GameData.EXPEDITION_COST
+	h["month_out"] += GameData.EXPEDITION_COST
+	add_rep(pid(), 60)
+	open_east()
+	return {"ok": true, "msg": "探险队三个月后带回了一张海图：东边的云崖里有一道风隙。海图上出现了「风隙」，派旗舰去看看。"}
+
+
+func open_east() -> void:
+	if explore_open():
+		return
+	s["explore"]["open"] = true
+	_say("东云域的航路出现在海图上。旗舰驶向「风隙」，就能探索雾里的世界。", "major")
+
+
+func nearest_open_port(from_id: String) -> String:
+	var best := ""
+	for pid in open_ports():
+		if best == "" or GameData.distance(from_id, pid) < GameData.distance(from_id, best):
+			best = pid
+	return best
+
+
+## The flagship has reached a point in the fog for the first time.
+func _discover(sh: Dictionary, sid: String) -> void:
+	s["explore"]["found"][sid] = true
+	var sp: Dictionary = GameData.SPOTS[sid]
+	var lines := []
+	var title := ""
+	var h := house()
+	if sp["kind"] == "port":
+		title = "发现新城 · %s" % sp["name"]
+		lines.append(GameData.PORTS[sid]["desc"])
+		add_exp(200)
+		add_rep(pid(), 100)
+		add_friend(sid, pid(), 100)
+		_update_intel(sid)
+		lines.append("名声 +100，经验 +200，本城友好度 +100。这座城从此画在海图上——别的商会也会很快跟来。")
+	else:
+		title = "%s · %s" % [GameData.SPOT_KIND_NAMES[sp["kind"]], sp["name"]]
+		lines.append(sp["found"])
+		var rw: Dictionary = sp["reward"]
+		if rw.has("gold"):
+			h["gold"] += float(rw["gold"])
+			h["month_in"] += float(rw["gold"])
+			lines.append("得到 %d 金。" % int(rw["gold"]))
+		if rw.has("good"):
+			var g: String = rw["good"][0]
+			if g == "random":
+				var pool: Array = GameData.GOOD_IDS.filter(func(x): return GameData.tier(x) <= 2)
+				g = pool[rng.randi() % pool.size()]
+			var n := mini(int(rw["good"][1]), cargo_cap(sh) - cargo_used(sh))
+			if n > 0:
+				_stow(sh, g, n, 0.0)
+				lines.append("装上%s %d 件。" % [GameData.good_name(g), n])
+			else:
+				lines.append("货舱已满，%s只能留在雾里。" % GameData.good_name(g))
+		if rw.has("bp"):
+			h["bp"][rw["bp"]] = true
+			lines.append("获得%s的秘传图纸。" % GameData.good_name(rw["bp"]))
+		if rw.has("ship"):
+			var port := nearest_open_port(sid)
+			if ships_of(pid()).size() < max_ships():
+				var ns := _add_ship(pid(), rw["ship"], port, "拾遗号")
+				ns["dmg"] = 70
+				lines.append("「拾遗号」被拖到了 %s 的船坞，战损 70%%，修好就能用。" % GameData.port_name(port))
+			else:
+				h["gold"] += 8000.0
+				lines.append("船队已满员，残船卖给了 %s 的船坞：8,000 金。" % GameData.port_name(port))
+		if rw.has("exp"):
+			add_exp(int(rw["exp"]))
+		if rw.has("rep"):
+			add_rep(pid(), int(rw["rep"]))
+		if rw.has("ambush") and rng.randf() < float(rw["ambush"]):
+			start_encounter("pirates")
+			lines.append("云盗从货舱里冲了出来！")
+	var newly := seen_spots().size()
+	if newly > 0:
+		lines.append("雾散开了一些：海图上出现了 %d 个新的去处。" % newly)
+	s["discovery"] = {"id": sid, "title": title, "lines": lines, "kind": sp["kind"]}
+	_say(title, "major")
 
 
 # ---------------------------------------------------------------- encounters & battle
@@ -1540,7 +1734,8 @@ func _post_bounty() -> void:
 	var fl := flagship()
 	if fl.is_empty():
 		return
-	var port: String = GameData.PORT_IDS[rng.randi() % GameData.PORT_IDS.size()]
+	var open := open_ports()
+	var port: String = open[rng.randi() % open.size()]
 	var power := int(float(fleet_power(fl)) * rng.randf_range(0.8, 1.2))
 	var reward := int(roundf(float(power) * rng.randf_range(14.0, 20.0) / 100.0) * 100.0)
 	var c := {"id": s["next_contract_id"], "kind": "bounty", "port": port, "good": "", "qty": 0, "reward": reward,
@@ -1817,7 +2012,8 @@ func _tick_fashion() -> void:
 			s["fashion"] = null
 		return
 	if int(s["day"]) > 45 and rng.randf() < 1.0 / 75.0:
-		var port: String = GameData.PORT_IDS[rng.randi() % GameData.PORT_IDS.size()]
+		var open := open_ports()
+		var port: String = open[rng.randi() % open.size()]
 		var options: Array = GameData.traded_goods(port).filter(func(g): return not g in GameData.PORTS[port]["make"])
 		var good: String = options[rng.randi() % options.size()]
 		var m: Dictionary = s["ports"][port]["market"][good]
@@ -1835,7 +2031,7 @@ func _tick_ships() -> void:
 		elif docked(sh):
 			if int(sh.get("dmg", 0)) > 0:
 				sh["dmg"] = maxi(0, int(sh["dmg"]) - GameData.DOCK_REPAIR)
-			if sh["owner"] == pid() and sh["route"] != null:
+			if sh["owner"] == pid() and sh["route"] != null and GameData.PORTS.has(sh["port"]):
 				_run_route(sh)
 			elif sh["owner"] != pid():
 				AiPlayer.ship_turn(self, sh)
@@ -1843,18 +2039,24 @@ func _tick_ships() -> void:
 
 func _on_arrive(sh: Dictionary) -> void:
 	if sh["owner"] == pid():
-		_update_intel(sh["port"])
+		var at_spot: bool = not GameData.PORTS.has(sh["port"])   # anchored at a point in the fog
+		if GameData.SPOTS.has(sh["port"]) and sh["flagship"] and not s["explore"]["found"].has(sh["port"]):
+			_discover(sh, sh["port"])
+		if not at_spot:
+			_update_intel(sh["port"])
 		if sh["flagship"]:
 			var hero: Dictionary = s["hero"]
 			hero["days_sailed"] = int(hero["days_sailed"]) + int(sh["arrive"]) - int(sh["depart"])
-			var first: bool = not hero["visited"].has(sh["port"])
-			hero["visited"][sh["port"]] = true
+			var first: bool = not at_spot and not hero["visited"].has(sh["port"])
+			if not at_spot:
+				hero["visited"][sh["port"]] = true
 			add_exp((int(sh["arrive"]) - int(sh["depart"])) * 3 + (40 if first else 0))
-		if sh["route"] != null:
+		if sh["route"] != null and not at_spot:
 			_run_route(sh)
 		elif sh["flagship"]:
 			_say("%s 抵达 %s。" % [sh["name"], GameData.port_name(sh["port"])])
-			s["arrived"] = sh["id"]
+			if not at_spot:
+				s["arrived"] = sh["id"]
 			for c in s["contracts"]:
 				if c.get("kind", "trade") == "bounty" and c.get("taker", "") == pid() and c["port"] == sh["port"]:
 					start_encounter("bounty", int(c["id"]))
@@ -2078,6 +2280,13 @@ func from_json(text: String) -> bool:
 	if not s.has("roam"):
 		s["roam"] = {"port": "", "until": 0}
 	s["roam"]["until"] = int(s["roam"]["until"])
+	if not s.has("explore"):
+		s["explore"] = {"open": false, "found": {}}
+	if not s.has("discovery"):
+		s["discovery"] = null
+	for pid in GameData.PORT_IDS:
+		if not s["ports"].has(pid):
+			_init_port(pid)   # a save from before the eastern sea existed
 	for cid in s["crew"]:
 		var m: Dictionary = s["crew"][cid]
 		for k in ["aff", "chapter", "ship", "joined", "gift_month", "spec_lvl"]:

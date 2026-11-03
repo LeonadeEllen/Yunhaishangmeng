@@ -11,6 +11,7 @@ func _init() -> void:
 		test_battle()
 		test_encounters()
 		test_crew()
+		test_explore()
 		print("FAILURES: %d" % failures)
 		quit(1 if failures > 0 else 0)
 		return
@@ -25,6 +26,7 @@ func _init() -> void:
 	test_battle()
 	test_encounters()
 	test_crew()
+	test_explore()
 	var seeds := [11, 22, 33, 44, 55]
 	var crowns := 0
 	var bot_stage := 0
@@ -501,6 +503,92 @@ func test_crew() -> void:
 	check(sim.dismiss("qian")["ok"] and not sim.crew().has("qian") and not sim.recruit_ok("qian", "qianqi", "tavern")["ok"], "a dismissed companion does not come back")
 
 
+## Sail the flagship to dest and run days until it is docked again (or something interrupts).
+func _sail_to(sim: Sim, dest: String) -> Dictionary:
+	var fl := sim.flagship()
+	var r := sim.depart(fl["id"], dest)
+	if not r["ok"]:
+		return r
+	for i in 60:
+		sim.advance_day()
+		if sim.s["event"] != null:
+			EventBook.resolve(sim, 0)
+		if sim.s["encounter"] != null:
+			sim.encounter_pay()
+		if sim.docked(sim.flagship()):
+			break
+	return r
+
+
+func test_explore() -> void:
+	print("exploring the eastern fog")
+	var sim := Sim.new()
+	sim.new_game(77)
+	var fl := sim.flagship()
+	check(sim.open_ports().size() == GameData.WEST_IDS.size(), "the eastern cities start off the charts")
+	check(not sim.depart(fl["id"], "qinglu")["ok"], "nobody can sail to an uncharted city")
+	check(not sim.depart(fl["id"], "fengxi")["ok"], "the strait is unknown before the expedition")
+	check(not sim.expedition_ok()["ok"], "an expedition needs reputation")
+	sim.house()["rep"] = GameData.REP_LEVELS[GameData.EXPEDITION_REP - 1]
+	sim.house()["gold"] = 100000.0
+	var g0: float = sim.house()["gold"]
+	check(sim.sponsor_expedition()["ok"] and sim.explore_open() and sim.house()["gold"] == g0 - GameData.EXPEDITION_COST, "sponsoring the expedition charts the strait")
+	check(sim.seen_spots() == ["fengxi"], "only the strait is visible at first (%s)" % str(sim.seen_spots()))
+	check(not sim.depart(fl["id"], "qinglu")["ok"], "the eastern cities are still hidden")
+	# a rival cannot sail east; an escort cannot explore
+	var rival: Dictionary = sim.ships_of("iron")[0]
+	check(not sim.depart(rival["id"], "fengxi")["ok"], "rivals do not explore")
+	sim.s["day"] = 100
+	var r := _sail_to(sim, "fengxi")
+	check(r["ok"] and sim.docked(sim.flagship()) and sim.flagship()["port"] == "fengxi", "the flagship anchors at the strait")
+	check(sim.spot_found("fengxi") and sim.s["discovery"] != null and sim.s["discovery"]["kind"] == "passage", "reaching the strait is a discovery")
+	sim.s["discovery"] = null
+	var seen := sim.seen_spots()
+	check("qinglu" in seen and "wreck_a" in seen and "jinduo" in seen, "the strait reveals what lies within sight (%s)" % str(seen))
+	check(not ("wuyin" in seen), "the deep fog stays hidden")
+	# a hidden city becomes a real port
+	var exp0 := int(sim.hero()["exp"])
+	r = _sail_to(sim, "qinglu")
+	check(r["ok"] and sim.flagship()["port"] == "qinglu" and sim.port_open("qinglu"), "the flagship reaches and charts 青芦港")
+	check(sim.open_ports().size() == GameData.WEST_IDS.size() + 1 and sim.s["intel"]["qinglu"] != null, "a found city joins the charts with fresh intel")
+	check(int(sim.hero()["exp"]) > exp0 and sim.friend_level("qinglu") >= 1, "discovery pays experience and friendship")
+	check(sim.buy_price("qinglu", "wine") < sim.buy_price("qianqi", "wine"), "the east makes the processed goods the west lacks (%d vs %d)" % [sim.buy_price("qinglu", "wine"), sim.buy_price("qianqi", "wine")])
+	check(sim.sail_ok(rival, "qinglu")["ok"], "once charted, rivals may trade there too")
+	sim.s["discovery"] = null
+	# a ruin: rewards, then the fleet waits in the fog for the next order
+	var found0 := sim.found_spots().size()
+	sim.s["explore"]["found"]["jinduo"] = true   # pretend the bell ruin is in sight
+	sim.s["day"] = 400
+	g0 = sim.house()["gold"]
+	r = _sail_to(sim, "ruin_bell")
+	check(r["ok"] and sim.docked(sim.flagship()) and sim.flagship()["port"] == "ruin_bell", "the flagship anchors at the ruin")
+	check(sim.house()["gold"] >= g0 + 6000 - 4000 and sim.found_spots().size() == found0 + 2, "the ruin pays out (%d -> %d)" % [int(g0), int(sim.house()["gold"])])
+	check(not sim.depart(sim.flagship()["id"], "ruin_bell")["ok"], "a found spot is not a destination again")
+	check(sim.depart(sim.flagship()["id"], "jinduo")["ok"], "the fleet can sail on from the fog")
+	# the derelict gunboat
+	sim.s["explore"]["found"]["jiaoyan"] = true
+	for i in 30:
+		sim.advance_day()
+		if sim.docked(sim.flagship()):
+			break
+	sim.s["discovery"] = null
+	var n0 := sim.ships_of(sim.pid()).size()
+	r = _sail_to(sim, "wreck_c")
+	check(r["ok"] and sim.ships_of(sim.pid()).size() == n0 + 1, "the stranded gunboat joins the fleet (%d -> %d)" % [n0, sim.ships_of(sim.pid()).size()])
+	sim.s["discovery"] = null
+	# save / load keeps the charts
+	var json := sim.to_json()
+	var sim2 := Sim.new()
+	check(sim2.from_json(json) and sim2.explore_open() and sim2.spot_found("qinglu") and sim2.open_ports().size() == sim.open_ports().size(), "exploration survives save and load")
+	# an old save without the eastern ports gets them
+	var parsed = JSON.parse_string(json)
+	for pid in GameData.EAST_IDS:
+		parsed["ports"].erase(pid)
+	parsed["explore"] = {"open": false, "found": {}}
+	var sim3 := Sim.new()
+	check(sim3.from_json(JSON.stringify(parsed)) and sim3.s["ports"].has("wuyin") and sim3.s["intel"].has("wuyin"), "old saves gain the eastern ports")
+
+
 func test_bot_player(sd: int) -> Dictionary:
 	print("bot player seed %d" % sd)
 	var sim := Sim.new()
@@ -512,6 +600,8 @@ func test_bot_player(sd: int) -> Dictionary:
 			EventBook.resolve(sim, 0)
 		if sim.s["encounter"] != null:
 			sim.auto_encounter()
+		if sim.s["discovery"] != null:
+			sim.s["discovery"] = null
 		for sh in sim.ships_of(sim.pid()):
 			if sim.docked(sh):
 				AiPlayer.ship_turn(sim, sh)

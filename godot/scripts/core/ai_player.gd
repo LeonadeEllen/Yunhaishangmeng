@@ -137,7 +137,7 @@ static func _best_plan(sim: Sim, sh: Dictionary, needs: Dictionary) -> Dictionar
 			var q := sim.est_buy(port, g, qty, hid, budget)
 			if q["qty"] < 5:
 				continue
-			for dest in GameData.PORT_IDS:
+			for dest in sim.open_ports():
 				if dest == port or not GameData.trades(dest, g):
 					continue
 				var value: float
@@ -166,12 +166,12 @@ static func _best_plan(sim: Sim, sh: Dictionary, needs: Dictionary) -> Dictionar
 static func _best_source(sim: Sim, sh: Dictionary) -> String:
 	var best := ""
 	var best_gap := 0.0
-	for pid in GameData.PORT_IDS:
+	for pid in sim.open_ports():
 		if pid == sh["port"]:
 			continue
 		for g in GameData.traded_goods(pid):
 			var gap := 0.0
-			for dest in GameData.PORT_IDS:
+			for dest in sim.open_ports():
 				if GameData.trades(dest, g):
 					gap = maxf(gap, float(sim.sell_price(dest, g) - sim.buy_price(pid, g)))
 			var score := gap / float(1 + GameData.travel_days(sh["port"], pid, sh["type"]))
@@ -202,7 +202,7 @@ static func monthly(sim: Sim, hid: String) -> void:
 		# contest the player's strongest foothold now and then
 		elif lh["stage"] >= 1 and sim.rng.randf() < 0.15:
 			var me := sim.pid()
-			for port in GameData.PORT_IDS:
+			for port in sim.open_ports():
 				if sim.patron(port) != me or Industry.count_buildings(sim, port, me) < 2:
 					continue
 				var plots: Array = sim.s["ports"][port]["plots"]

@@ -96,8 +96,73 @@ const PORTS := {
 	"chishi":   {"name": "赤石矶", "pos": Vector2(850, 830),  "island": 0, "make": ["stone", "fruit"],    "want": ["silk", "fiber", "brass"],
 		"plots": ["stone", "fruit", "workshop", "stone", "fruit", "workshop", "workshop"],
 		"desc": "赤色岩壁里藏着霞纹石，梯田上的霞果一到秋天就红透山崖。"},
+	# ---- the eastern cloud sea (region 2): hidden in fog until the player charts it (round 10).
+	# Its cities naturally make the processed goods nobody in the west makes: long hauls pay.
+	"qinglu":   {"name": "青芦港", "pos": Vector2(1900, 720), "island": 2, "make": ["wheat", "wine"],     "want": ["steel", "canvas", "incense", "cannon"], "region": 2,
+		"plots": ["wheat", "wheat", "workshop", "wheat", "workshop", "workshop", "wheat"],
+		"desc": "东云域的门户。芦荡连天，芦酒的香气顺着风飘出几十里。这里的人第一次见到西边的帆。"},
+	"jinduo":   {"name": "金铎城", "pos": Vector2(2000, 300), "island": 8, "make": ["copper", "brass"],    "want": ["silk", "wine", "lamp", "feast"], "region": 2,
+		"plots": ["copper", "workshop", "copper", "workshop", "workshop", "copper", "workshop"],
+		"desc": "赫兰的故乡。千座铜钟挂满城墙，整点齐鸣。铜匠的手艺是西边比不了的。"},
+	"baisha":   {"name": "白砂洲", "pos": Vector2(2350, 560), "island": 5, "make": ["stone", "glass"],     "want": ["fish", "oil", "canvas", "astro"], "region": 2,
+		"plots": ["stone", "workshop", "stone", "workshop", "stone", "workshop", "workshop"],
+		"desc": "白色的砂洲在云上发亮，窑火把砂烧成琉璃。工匠们不识字，却能吹出会唱歌的瓶子。"},
+	"jiaoyan":  {"name": "焦岩堡", "pos": Vector2(2600, 820), "island": 0, "make": ["timber", "smoked"],   "want": ["brass", "silk", "glass", "balm"], "region": 2,
+		"plots": ["timber", "timber", "workshop", "timber", "workshop", "workshop", "workshop"],
+		"desc": "黑色的岩堡，云盗的老巢也是云盗的集市。熏鱼和黑木在这里成交，没人问来路。"},
+	"wuyin":    {"name": "雾隐泊", "pos": Vector2(2750, 250), "island": 3, "make": ["pearl", "oil"],      "want": ["wheat", "steel", "elixir"], "region": 2,
+		"plots": ["pearl", "workshop", "pearl", "workshop", "pearl", "workshop", "workshop"],
+		"desc": "藏在最深的雾里。整座城靠灯油活着，白天也点灯。采珠人说雾里的珍珠比西边的大一圈。"},
 }
-const PORT_IDS := ["qianqi", "hongxiao", "muxia", "xiajing", "fengyue", "cuijing", "tonghe", "chishi"]
+const PORT_IDS := ["qianqi", "hongxiao", "muxia", "xiajing", "fengyue", "cuijing", "tonghe", "chishi",
+	"qinglu", "jinduo", "baisha", "jiaoyan", "wuyin"]
+const WEST_IDS := ["qianqi", "hongxiao", "muxia", "xiajing", "fengyue", "cuijing", "tonghe", "chishi"]
+const EAST_IDS := ["qinglu", "jinduo", "baisha", "jiaoyan", "wuyin"]
+
+# ------------------------------------------------------------------ exploration (round 10)
+# Points in the eastern fog. A hidden city is keyed by its port id; the rest are one-off finds.
+# A point can be sailed to once it is "seen": within SIGHT of something already found.
+# reward keys: gold, good [id, qty] ("random" = a random tier 1-2 good), bp (a blueprint), exp, rep,
+#              ship (a derelict joins the fleet, with damage), ambush (chance of pirates waiting).
+const SPOTS := {
+	"fengxi":      {"name": "风隙",     "pos": Vector2(1620, 480), "kind": "passage", "icon": 0,
+		"desc": "两道云崖之间的窄缝，季风在这里呼啸。探险队说，穿过去就是另一片云海。",
+		"found": "风隙之后，云海豁然开朗。东边的雾里隐约有灯火。", "reward": {"exp": 120, "rep": 40}},
+	"qinglu":      {"name": "青芦港",   "kind": "port"},
+	"jinduo":      {"name": "金铎城",   "kind": "port"},
+	"baisha":      {"name": "白砂洲",   "kind": "port"},
+	"jiaoyan":     {"name": "焦岩堡",   "kind": "port"},
+	"wuyin":       {"name": "雾隐泊",   "kind": "port"},
+	"wreck_a":     {"name": "漂流货船", "pos": Vector2(1800, 150), "kind": "wreck", "icon": 1,
+		"desc": "一艘没有旗号的货船在云里打转，甲板上没有人。",
+		"found": "船舱里的货还好好的。船员把能搬的都搬了过来。", "reward": {"good": ["random", 40], "exp": 80}},
+	"wreck_b":     {"name": "漂流货船", "pos": Vector2(2100, 520), "kind": "wreck", "icon": 1,
+		"desc": "一艘倾斜的货船，船尾挂着半截断绳。",
+		"found": "货舱里塞满了货——也塞满了等你的云盗。", "reward": {"good": ["random", 30], "exp": 80, "ambush": 0.5}},
+	"wreck_c":     {"name": "搁浅的炮舰", "pos": Vector2(2750, 950), "kind": "wreck", "icon": 1,
+		"desc": "一艘炮舰搁在浮岩上，船身千疮百孔，炮还在。",
+		"found": "工匠们把它从浮岩上撬下来：修一修，还能飞。", "reward": {"ship": "gunboat", "exp": 150, "rep": 60}},
+	"ruin_bell":   {"name": "沉钟遗迹", "pos": Vector2(2150, 150), "kind": "ruin", "icon": 2,
+		"desc": "云里探出半座青铜钟楼，钟还会在风里自己响。",
+		"found": "钟楼底下的密室里堆着前朝的金锭。", "reward": {"gold": 6000, "exp": 150, "rep": 80}},
+	"ruin_garden": {"name": "悬园遗迹", "pos": Vector2(2500, 420), "kind": "ruin", "icon": 2,
+		"desc": "一座悬在云上的废园，香木长成了林。",
+		"found": "园中石碑上刻着香膏的古法。你的工匠一字一字抄了下来。", "reward": {"bp": "balm", "exp": 200, "rep": 80}},
+	"ruin_fort":   {"name": "断崖残堡", "pos": Vector2(2850, 600), "kind": "ruin", "icon": 2,
+		"desc": "崖壁上的堡垒塌了一半，炮口还朝着东方。",
+		"found": "堡里的云炮完好无损，一共六门。", "reward": {"good": ["cannon", 6], "gold": 3000, "exp": 150, "rep": 60}},
+	"ruin_temple": {"name": "鲸骨神庙", "pos": Vector2(2300, 900), "kind": "ruin", "icon": 2,
+		"desc": "用整条云鲸的骨架搭成的神庙。雾里有歌声。",
+		"found": "神庙里供着一瓮瓮霞露，守庙的老人把它们送给了你。", "reward": {"good": ["elixir", 10], "exp": 200, "rep": 80}},
+}
+const SPOT_IDS := ["fengxi", "qinglu", "jinduo", "baisha", "jiaoyan", "wuyin", "wreck_a", "wreck_b", "wreck_c",
+	"ruin_bell", "ruin_garden", "ruin_fort", "ruin_temple"]
+const SPOT_KIND_NAMES := {"passage": "航路", "port": "城市", "wreck": "漂流物", "ruin": "遗迹"}
+const EXPEDITION_COST := 40000     # sponsor an expedition at any guild to chart the passage east
+const EXPEDITION_REP := 3
+const SIGHT := 440.0               # map pixels: how far a discovery lets you see into the fog
+const EAST_ENCOUNTER := 2.0        # pirates are this much more common on voyages touching the east
+const EAST_X := 1560.0             # map x where the western charts end
 
 const PATRON_FEE := 1.03      # non-patrons pay this much more when buying at a port
 const BUYOUT_MULT := 1.6      # price of buying a rival's building, vs. its build cost
@@ -228,10 +293,27 @@ static func good_name(g: String) -> String:
 
 
 static func port_name(p: String) -> String:
-	if not PORTS.has(p):
-		push_warning("port_name: unknown port '%s'" % p)
-		return "云海"
-	return PORTS[p]["name"]
+	if PORTS.has(p):
+		return PORTS[p]["name"]
+	if SPOTS.has(p):
+		return SPOTS[p]["name"]
+	push_warning("port_name: unknown port '%s'" % p)
+	return "云海"
+
+
+## Map position of a port or an exploration point.
+static func pos_of(id: String) -> Vector2:
+	if PORTS.has(id):
+		return PORTS[id]["pos"]
+	if SPOTS.has(id):
+		return SPOTS[id]["pos"]
+	return Vector2(800, 500)
+
+
+static func region_of(id: String) -> int:
+	if PORTS.has(id):
+		return int(PORTS[id].get("region", 1))
+	return 2 if pos_of(id).x >= EAST_X else 1
 
 
 static func tier(g: String) -> int:
@@ -289,7 +371,7 @@ static func friend_level(points: int) -> int:
 
 
 static func distance(a: String, b: String) -> float:
-	return (PORTS[a]["pos"] as Vector2).distance_to(PORTS[b]["pos"])
+	return pos_of(a).distance_to(pos_of(b))
 
 
 static func travel_days(a: String, b: String, ship_type: String) -> int:
@@ -299,7 +381,7 @@ static func travel_days(a: String, b: String, ship_type: String) -> int:
 ## Wind multiplier on travel time for a voyage a → b on the given day (1.0 ± WIND_EFFECT).
 static func wind_factor(a: String, b: String, day: int) -> float:
 	var w: Vector2 = WIND[(day % DAYS_YEAR) / 90]
-	var heading: Vector2 = ((PORTS[b]["pos"] as Vector2) - (PORTS[a]["pos"] as Vector2)).normalized()
+	var heading: Vector2 = (pos_of(b) - pos_of(a)).normalized()
 	return 1.0 - WIND_EFFECT * heading.dot(w)
 
 

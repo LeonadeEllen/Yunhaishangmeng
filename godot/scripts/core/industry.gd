@@ -479,7 +479,7 @@ static func ai_build(sim: Sim, hid: String, budget: float) -> void:
 	var best := {}
 	var best_score := 0.0
 	var home: String = GameData.HOUSES[hid]["home"]
-	for pid in GameData.PORT_IDS:
+	for pid in sim.open_ports():
 		if count_buildings(sim, pid, hid) >= build_limit(sim, pid, hid):
 			continue
 		var plots: Array = sim.s["ports"][pid]["plots"]

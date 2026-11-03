@@ -150,7 +150,7 @@ func _rumour(r: RandomNumberGenerator) -> String:
 	var g: String = GameData.PORTS[port]["make"][r.randi_range(0, 1)]
 	var best := ""
 	var best_p := 0
-	for pid in GameData.PORT_IDS:
+	for pid in sim.open_ports():
 		if pid == port:
 			continue
 		var sp := sim.sell_price(pid, g)

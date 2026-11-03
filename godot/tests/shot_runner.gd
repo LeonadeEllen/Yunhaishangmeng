@@ -209,6 +209,37 @@ func run(m: Control) -> void:
 	await _shot("17c_chapter")
 	main._choose_event(0)
 	main._close_modal()
+	# round 10: the eastern fog
+	main.sim.house()["rep"] = 700
+	main.sim.house()["gold"] = 90000.0
+	main._open_port("muxia", 4)
+	await _wait(0.3)
+	await _shot("18_guild_expedition")
+	main.sim.sponsor_expedition()
+	main.sim.s["explore"]["found"]["fengxi"] = true
+	main.sim.s["explore"]["found"]["qinglu"] = true
+	main.sim.s["explore"]["found"]["wreck_a"] = true
+	main.map.set_region(2)
+	main.map._vx = main.map.VIEW_EAST.position.x
+	main._refresh_all()
+	main._open_spot("jinduo")
+	await _wait(0.5)
+	await _shot("18b_east_fog")
+	main.sim.s["day"] = 420
+	main.sim.s["explore"]["found"].erase("jinduo")
+	var fl2: Dictionary = main.sim.flagship()
+	fl2["port"] = "jinduo"
+	main.sim._discover(fl2, "jinduo")
+	main._show_discovery()
+	await _wait(0.4)
+	await _shot("18c_discovery")
+	main._close_modal()
+	main.sim.s["explore"]["found"]["ruin_bell"] = true
+	main.sim.s["discovery"] = null
+	main._open_spot("ruin_bell")
+	main._refresh_all()
+	await _wait(0.4)
+	await _shot("18d_east_charted")
 	main.sim.s["crown"] = {"hid": main.sim.pid(), "day": main.sim.s["day"]}
 	main._crown_celebration()
 	await _wait(0.4)

@@ -14,6 +14,8 @@ var _last_day := -1
 var _flag_docked := true
 var _game_on := false
 var _port := ""                  # port shown in the side panel
+var _spot := ""                  # fog point shown in the side panel (then _port is "")
+var region_btn: Button
 var _tab := 0
 var _modal_open := false
 var _difficulty := 1
@@ -211,6 +213,7 @@ func _show_help() -> void:
 		"· 城镇：旗舰进港后会走进城里。WASD 走动，点建筑进门办事，Esc 回到海图。路人会透露行情。",
 		"· 主角：卖货、航行、委托和建坊都涨经验，升级得能力点，点顶栏的名字分配到航海 / 交易 / 魅力。",
 		"· 航行与空战：季风随季节转向，顺风航程更短。载货航行可能遇上云盗：应战、交过路费或甩开。空战是回合制六角格：炮击、接舷、修补、防御、撤退，主角升级学会指挥战术。酒馆有剿匪悬赏。",
+		"· 探索：名声「商董」后可在任何行会赞助探险队（40,000 金），海图上出现通往东云域的「风隙」。只有旗舰能去雾里的「?」处探索：发现城市、遗迹、漂流物，每个发现都会让周围的雾散开一些。东边的城天然出产西边没人做的加工品，长途跑一趟利润厚，云盗也多一倍。",
 		"· 伙伴：酒馆、船坞、行会里能遇到 12 位各有专长的人物，付安家费招入商会，每月发薪。安排岗位（航海长、账房、炮术长、接舷队长、船长）吃他们的能力加成；一起航行、打赢云盗、送礼都涨好感，好感到了会触发三章个人剧情，走完专长更强。",
 		"· 时间：空格暂停，1/2/3 切换速度。旗舰抵港时自动暂停。",
 		"· 灯塔：三层灯塔是云海盟主的象征，不建也可以一直玩下去。金币为负超过 30 天会破产。",
@@ -268,6 +271,10 @@ func _build_game() -> void:
 	map.port_clicked.connect(_on_port_clicked)
 	map.port_hovered.connect(_on_port_hovered)
 	add_child(map)
+	region_btn = UiKit.button("东云域 ▶", _toggle_region)
+	region_btn.tooltip_text = "在西边的霞市和东边的云域之间切换海图"
+	region_btn.visible = false
+	add_child(region_btn)
 	town = TownView.new()
 	town.sim = sim
 	town.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -424,11 +431,19 @@ func _after_day() -> bool:
 	var stop := false
 	var fl := sim.flagship()
 	var now_docked := not fl.is_empty() and sim.docked(fl)
-	if now_docked and not _flag_docked:
+	if sim.s.get("discovery") != null:
 		sfx("bell")
 		_set_speed(0)
-		_open_port(fl["port"], 0)
-		_enter_town()
+		_show_discovery()
+		stop = true
+	elif now_docked and not _flag_docked:
+		sfx("bell")
+		_set_speed(0)
+		if GameData.PORTS.has(fl["port"]):
+			_open_port(fl["port"], 0)
+			_enter_town()
+		else:
+			_open_spot(fl["port"])
 		stop = true
 	_flag_docked = now_docked
 	if int(sim.house()["lh"]["stage"]) > _lh_seen:
@@ -517,6 +532,7 @@ func _refresh_top() -> void:
 	top_net.add_theme_color_override("font_color", Color("a8dcb8") if net >= 0 else Color("f2b8a6"))
 	top_debt.text = ("欠款 %s" % UiKit.money(h["debt"])) if h["debt"] > 0.5 else ""
 	top_date.text = GameData.date_text(sim.s["day"])
+	_refresh_region_btn()
 	var hero: Dictionary = sim.hero()
 	hero_btn.text = "%s %d 级%s" % [GameData.HOUSES[sim.pid()]["leader"], int(hero["lvl"]), (" · %d 点" % int(hero["pts"])) if int(hero["pts"]) > 0 else ""]
 	hero_btn.tooltip_text = "主角能力与经验" + ("（有 %d 点能力点待分配）" % int(hero["pts"]) if int(hero["pts"]) > 0 else "")
@@ -640,8 +656,18 @@ func _on_port_hovered(pid: String) -> void:
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 3)
 	hover_card.add_child(v)
-	v.add_child(UiKit.label(GameData.port_name(pid), 18, UiKit.INK, true))
 	var fl := sim.flagship()
+	if not GameData.PORTS.has(pid):
+		var found := sim.spot_found(pid)
+		v.add_child(UiKit.label(GameData.SPOTS[pid]["name"] if found else "？ 迷雾中的去处", 18, UiKit.INK, true))
+		if not fl.is_empty() and sim.docked(fl) and fl["port"] != pid and not found:
+			v.add_child(UiKit.label("旗舰前往探索：%d 天 · 补给 %d 金" % [sim.ship_days(fl, pid), sim.fuel_cost_for(fl, pid)], 14, UiKit.JADE, true))
+		hover_card.visible = true
+		hover_card.reset_size()
+		var mp0 := get_local_mouse_position() + Vector2(18, 18)
+		hover_card.position = Vector2(minf(mp0.x, size.x - 572 - hover_card.size.x - 8), minf(mp0.y, size.y - hover_card.size.y - 8))
+		return
+	v.add_child(UiKit.label(GameData.port_name(pid), 18, UiKit.INK, true))
 	if not fl.is_empty() and sim.docked(fl) and fl["port"] != pid:
 		v.add_child(UiKit.label("旗舰前往：%d 天 · 补给 %d 金" % [sim.ship_days(fl, pid), sim.fuel_cost_for(fl, pid)], 14, UiKit.JADE, true))
 	for c in sim.open_contracts(pid):
@@ -669,11 +695,24 @@ func _on_port_hovered(pid: String) -> void:
 
 
 func _on_port_clicked(pid: String) -> void:
-	_open_port(pid, 0 if _port != pid else _tab)
+	if GameData.PORTS.has(pid):
+		_open_port(pid, 0 if _port != pid else _tab)
+	else:
+		_open_spot(pid)
+
+
+func _open_spot(sid: String) -> void:
+	_spot = sid
+	_port = ""
+	map.selected_port = sid
+	if _in_town:
+		_leave_town()
+	_refresh_side()
 
 
 func _open_port(pid: String, tab: int = -1) -> void:
 	_port = pid
+	_spot = ""
 	if tab >= 0:
 		_tab = tab
 	map.selected_port = pid
@@ -685,15 +724,17 @@ func _open_port(pid: String, tab: int = -1) -> void:
 ## Step off the flagship into the town of the port it is docked at.
 func _enter_town() -> void:
 	var fl := sim.flagship()
-	if fl.is_empty() or not sim.docked(fl):
+	if fl.is_empty() or not sim.docked(fl) or not GameData.PORTS.has(fl["port"]):
 		return
 	_port = fl["port"]
+	_spot = ""
 	map.selected_port = _port
 	_in_town = true
 	_town_kind = ""
 	town.open(_port)
 	town.visible = true
 	map.visible = false
+	_refresh_region_btn()
 	_refresh_side()
 
 
@@ -702,6 +743,7 @@ func _leave_town() -> void:
 	_town_kind = ""
 	town.visible = false
 	map.visible = true
+	_refresh_region_btn()
 	_refresh_side()
 
 
@@ -715,7 +757,13 @@ func _on_building_entered(kind: String) -> void:
 
 
 func _refresh_side() -> void:
-	if side_body == null or _port == "":
+	if side_body == null:
+		return
+	if _spot != "":
+		UiKit.clear(side_body)
+		_spot_panel()
+		return
+	if _port == "":
 		return
 	UiKit.clear(side_body)
 	var p: Dictionary = GameData.PORTS[_port]
@@ -792,6 +840,85 @@ func _refresh_side() -> void:
 		4: _tab_guild()
 		5: _tab_tavern()
 		6: _tab_lighthouse()
+
+
+## Side panel for a point in the eastern fog: what is known about it and the way to get there.
+func _spot_panel() -> void:
+	var sp: Dictionary = GameData.SPOTS[_spot]
+	var found := sim.spot_found(_spot)
+	var fl := sim.flagship()
+	var here: bool = not fl.is_empty() and sim.docked(fl) and fl["port"] == _spot
+	var head := HBoxContainer.new()
+	head.add_child(UiKit.icon(UiKit.scene_art("explore_scene"), 74))
+	var hv := VBoxContainer.new()
+	hv.add_theme_constant_override("separation", 2)
+	hv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hv.add_child(UiKit.label(("%s · %s" % [GameData.SPOT_KIND_NAMES[sp["kind"]], sp["name"]]) if found else "？ 迷雾中的去处", 24, UiKit.INK, true))
+	hv.add_child(UiKit.para(sp.get("desc", "") if found else "雾里隐约有东西：也许是一座城，也许是遗迹或漂流的船。只有旗舰能去探个明白。", 14, UiKit.MUTED))
+	if found and sp.has("found"):
+		hv.add_child(UiKit.para(sp["found"], 13, UiKit.INK))
+	head.add_child(hv)
+	side_body.add_child(head)
+	if here:
+		side_body.add_child(UiKit.label("你的船队停在这里。点海图上的「?」继续探索，或回到任何一座城。", 14, UiKit.JADE, true))
+	elif not fl.is_empty() and sim.docked(fl):
+		var ok := sim.sail_ok(fl, _spot)
+		var days := sim.ship_days(fl, _spot)
+		var fc := sim.fuel_cost_for(fl, _spot)
+		var go := UiKit.button(("旗舰前往探索 · %d 天 · 补给 %d 金" if not found else "旗舰前往此处 · %d 天 · 补给 %d 金") % [days, fc], func(): _sail(_spot))
+		if found:
+			go.disabled = true
+			go.tooltip_text = "已经探过了，不必再去。"
+		elif not ok["ok"]:
+			go.disabled = true
+			go.tooltip_text = ok["msg"]
+		side_body.add_child(go)
+	elif not fl.is_empty():
+		side_body.add_child(UiKit.label("旗舰航行中：前往 %s，剩 %d 天" % [GameData.port_name(fl["to"]), int(fl["arrive"]) - int(sim.s["day"])], 15, UiKit.JADE, true))
+	side_body.add_child(HSeparator.new())
+	side_body.add_child(UiKit.label("东云域探索 · 已发现 %d / %d" % [sim.found_spots().size(), GameData.SPOT_IDS.size()], 16, UiKit.INK, true))
+	var seen := sim.seen_spots()
+	side_body.add_child(UiKit.para("每个发现都会让周围的雾散开一些。现在能看见 %d 个未探索的去处。测绘艇和莫语的测绘能看得更远。" % seen.size(), 13, UiKit.MUTED))
+	for sid in sim.found_spots():
+		var s2: Dictionary = GameData.SPOTS[sid]
+		side_body.add_child(UiKit.label("✓ %s · %s" % [GameData.SPOT_KIND_NAMES[s2["kind"]], s2["name"]], 13, UiKit.UP))
+
+
+func _show_discovery() -> void:
+	var d = sim.s["discovery"]
+	if d == null:
+		return
+	sim.s["discovery"] = null
+	if d["kind"] == "passage":
+		map.set_region(2)
+	_modal(d["title"], "explore_scene", d["lines"], [["继续", func(): _close_modal(); _after_discovery()]])
+
+
+func _after_discovery() -> void:
+	var fl := sim.flagship()
+	if not fl.is_empty() and sim.docked(fl):
+		if GameData.PORTS.has(fl["port"]):
+			_open_port(fl["port"], 0)
+			_enter_town()
+		else:
+			_open_spot(fl["port"])
+	if sim.s["encounter"] != null:
+		_show_encounter()
+	_refresh_all()
+
+
+func _toggle_region() -> void:
+	map.set_region(3 - map.region)
+	_refresh_region_btn()
+
+
+func _refresh_region_btn() -> void:
+	if region_btn == null:
+		return
+	region_btn.visible = sim.explore_open() and not _in_town
+	region_btn.text = "东云域 ▶" if map.region == 1 else "◀ 霞市"
+	region_btn.reset_size()
+	region_btn.position = Vector2(size.x - 572 - region_btn.size.x - 16, size.y - region_btn.size.y - 16)
 
 
 func _contract_row(c: Dictionary, fl: Dictionary, show_port: bool) -> Control:
@@ -1342,6 +1469,23 @@ func _tab_hall() -> void:
 func _tab_guild() -> void:
 	var hid := sim.pid()
 	side_body.add_child(UiKit.label("工匠行会 · 名声「%s」" % GameData.REP_NAMES[sim.rep_level() - 1], 18, UiKit.INK, true))
+	var exp_box := PanelContainer.new()
+	exp_box.add_theme_stylebox_override("panel", UiKit.box(Color("eef3ef"), Color(UiKit.JADE, 0.5), 6, 1, 8))
+	var ev := VBoxContainer.new()
+	ev.add_theme_constant_override("separation", 4)
+	exp_box.add_child(ev)
+	if sim.explore_open():
+		ev.add_child(UiKit.label("远航探险 · 东云域航路已开", 15, UiKit.JADE, true))
+		ev.add_child(UiKit.para("已发现 %d / %d 处。把海图切到东云域，派旗舰去「?」处探索。" % [sim.found_spots().size(), GameData.SPOT_IDS.size()], 13, UiKit.MUTED))
+	else:
+		ev.add_child(UiKit.label("远航探险 · 东边的雾里有另一片云海", 15, UiKit.JADE, true))
+		ev.add_child(UiKit.para("赞助一支探险队去找通往东云域的航路。需要名声「%s」。那边的城出产西边没人做的货，也有遗迹和云盗。" % GameData.REP_NAMES[GameData.EXPEDITION_REP - 1], 13, UiKit.MUTED))
+		var eok := sim.expedition_ok()
+		var eb := UiKit.button("赞助探险队 · %s 金" % UiKit.money(GameData.EXPEDITION_COST), func(): _act(sim.sponsor_expedition()); _refresh_all())
+		eb.disabled = not eok["ok"]
+		eb.tooltip_text = eok.get("msg", "")
+		ev.add_child(eb)
+	side_body.add_child(exp_box)
 	side_body.add_child(UiKit.para("工艺图纸（二阶）：名声 3 级，并且经手过 %d 件主原料。秘传图纸（三阶）：名声 4 级、友好度 3，每座城只传一种。" % GameData.CRAFT_HANDLED, 13, UiKit.MUTED))
 	side_body.add_child(UiKit.label("工艺图纸", 16, UiKit.INK, true))
 	for g in GameData.GOOD_IDS:
@@ -1552,6 +1696,8 @@ func _sail(dest: String) -> void:
 	if res["ok"]:
 		sfx("sail")
 		_flag_docked = false
+		map.set_region(GameData.region_of(dest))
+		_refresh_region_btn()
 		if _in_town:
 			_leave_town()
 		if speed_idx == 0:
@@ -2033,10 +2179,11 @@ func _show_route_dialog(ship_id: int) -> void:
 			row.add_theme_constant_override("separation", 6)
 			row.add_child(UiKit.label("第 %d 站" % (i + 1), 14, UiKit.MUTED, true))
 			var op := OptionButton.new()
-			for pid in GameData.PORT_IDS:
+			var ports: Array = sim.open_ports()
+			for pid in ports:
 				op.add_item(GameData.port_name(pid))
-			op.select(GameData.PORT_IDS.find(stops[i]["port"]))
-			op.item_selected.connect(func(k): stops[idx]["port"] = GameData.PORT_IDS[k]; update_est.call())
+			op.select(ports.find(stops[i]["port"]))
+			op.item_selected.connect(func(k): stops[idx]["port"] = ports[k]; update_est.call())
 			row.add_child(op)
 			row.add_child(UiKit.label("买", 14, UiKit.MUTED))
 			for slot in GameData.ROUTE_MAX_BUYS:
@@ -2063,7 +2210,7 @@ func _show_route_dialog(ship_id: int) -> void:
 			row.add_child(del)
 			list.add_child(row)
 		if stops.size() < GameData.ROUTE_MAX_STOPS:
-			list.add_child(UiKit.button("+ 加一站", func(): stops.append({"port": GameData.PORT_IDS[(GameData.PORT_IDS.find(stops[stops.size() - 1]["port"]) + 1) % GameData.PORT_IDS.size()], "buy": []}); rebuild.call(), true))
+			list.add_child(UiKit.button("+ 加一站", func(): var ps: Array = sim.open_ports(); stops.append({"port": ps[(ps.find(stops[stops.size() - 1]["port"]) + 1) % ps.size()], "buy": []}); rebuild.call(), true))
 		update_est.call()
 	rebuild.call()
 	var row := HBoxContainer.new()
@@ -2134,7 +2281,7 @@ func _tutorial_goal() -> Dictionary:
 	var good: String = GameData.PORTS[home]["make"][0]
 	var dest := ""
 	for g in GameData.PORTS[home]["make"]:
-		for pid in GameData.PORT_IDS:
+		for pid in GameData.WEST_IDS:
 			if g in GameData.PORTS[pid]["want"] and (dest == "" or GameData.distance(home, pid) < GameData.distance(home, dest)):
 				dest = pid
 				good = g
@@ -2143,7 +2290,7 @@ func _tutorial_goal() -> Dictionary:
 	if dest == "":
 		# nobody lists it as a want: send the player where it sells best
 		var best := -1
-		for pid in GameData.PORT_IDS:
+		for pid in GameData.WEST_IDS:
 			if pid == home:
 				continue
 			var sp := sim.sell_price(pid, good)
