@@ -10,6 +10,7 @@ func _init() -> void:
 	test_price_feedback()
 	test_save_load()
 	test_idle_player_goes_bankrupt()
+	test_contracts_and_buyout()
 	var seeds := [11, 22, 33, 44, 55]
 	var wins := 0
 	for sd in seeds:
@@ -51,6 +52,33 @@ func run_until_over(sim: Sim, bot: bool, log_every: int = 0) -> void:
 				var h := sim.house(hid)
 				row.append("%s %7d g / lh %d / %d ships" % [hid, int(h["gold"]), h["lh"]["stage"], sim.ships_of(hid).size()])
 			print("    y%-2d " % (sim.s["day"] / GameData.DAYS_YEAR), " | ".join(row))
+
+
+func test_contracts_and_buyout() -> void:
+	var sim := Sim.new()
+	sim.new_game(7)
+	sim._post_contract()
+	var c: Dictionary = sim.open_contracts()[0]
+	var fl := sim.flagship()
+	fl["port"] = c["port"]
+	fl["cargo"] = {c["good"]: {"qty": int(c["qty"]) + 3, "cost": 10.0}}
+	var g0: float = sim.house()["gold"]
+	var r := sim.fulfill(fl["id"], c["id"])
+	check(r["ok"] and is_equal_approx(sim.house()["gold"], g0 + float(c["reward"])), "contract pays its reward")
+	check(sim.open_contracts().is_empty() and int(fl["cargo"][c["good"]]["qty"]) == 3, "contract is consumed with its goods")
+	check(not sim.fulfill(fl["id"], c["id"])["ok"], "a contract cannot be paid twice")
+	# workshops: cap, patron fee, buyout
+	var port := "muxia"
+	sim.s["ports"][port]["workshops"] = {"tower": 3, sim.pid(): 1}
+	check(sim.patron(port) == "tower", "most workshop levels makes the patron")
+	check(not sim.invest(port)["ok"], "a full port refuses new workshops")
+	var before := sim.buy_price(port, "fish")
+	sim.house()["gold"] = 100000.0
+	var tg: float = sim.house("tower")["gold"]
+	check(sim.buyout(port, "tower")["ok"], "buyout succeeds with enough gold")
+	check(int(sim.s["ports"][port]["workshops"]["tower"]) == 2 and int(sim.s["ports"][port]["workshops"][sim.pid()]) == 2, "buyout moves one level")
+	check(sim.house("tower")["gold"] > tg, "the seller is compensated")
+	check(sim.patron(port) == "" and sim.buy_price(port, "fish") < before, "tie removes the patron fee")
 
 
 func test_price_feedback() -> void:

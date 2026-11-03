@@ -13,6 +13,9 @@ static func ship_turn(sim: Sim, sh: Dictionary) -> void:
 		return
 	var port: String = sh["port"]
 	var home: String = GameData.HOUSES[hid]["home"]
+	for c in sim.open_contracts(port):
+		if sim.can_fulfill(sh, c):
+			sim.fulfill(sh["id"], c["id"])
 	if port == home:
 		sim.deliver_mats(sh["id"])
 		# materials made right here: buy and hand them over directly
@@ -27,10 +30,17 @@ static func ship_turn(sim: Sim, sh: Dictionary) -> void:
 		sim.deliver_mats(sh["id"])
 	# sell everything that is not a needed material on its way home
 	var needs := _needs(sim, hid)
+	var chase := _held_contract(sim, sh)
 	for g in sh["cargo"].keys():
 		if needs.has(g) and port != home:
 			continue
+		if not chase.is_empty() and g == chase["good"]:
+			continue
 		sim.sell(sh["id"], g, int(sh["cargo"][g]["qty"]))
+	if not chase.is_empty():
+		_announce_chase(sim, hid, chase)
+		sim.depart(sh["id"], chase["port"])
+		return
 	# carrying lighthouse materials: head home, topping up with whatever pays on the way
 	var carrying := false
 	for g in sh["cargo"]:
@@ -52,6 +62,23 @@ static func ship_turn(sim: Sim, sh: Dictionary) -> void:
 		return
 	sim.buy(sh["id"], plan["good"], plan["qty"])
 	sim.depart(sh["id"], plan["dest"])
+
+
+## An open contract this ship already carries enough goods for (and can still reach in time).
+static func _held_contract(sim: Sim, sh: Dictionary) -> Dictionary:
+	for c in sim.open_contracts():
+		if c["port"] == sh["port"] or not sh["cargo"].has(c["good"]):
+			continue
+		if int(sh["cargo"][c["good"]]["qty"]) >= int(c["qty"]) and int(sim.s["day"]) + GameData.travel_days(sh["port"], c["port"], sh["type"]) <= int(c["end"]):
+			return c
+	return {}
+
+
+static func _announce_chase(sim: Sim, hid: String, c: Dictionary) -> void:
+	if hid in c["chasers"]:
+		return
+	c["chasers"].append(hid)
+	sim._say("%s 的飞艇正载着%s赶往 %s 交付委托。" % [GameData.HOUSES[hid]["name"], GameData.good_name(c["good"]), GameData.port_name(c["port"])], "rival")
 
 
 static func _needs(sim: Sim, hid: String) -> Dictionary:
@@ -103,12 +130,18 @@ static func _best_plan(sim: Sim, sh: Dictionary, needs: Dictionary) -> Dictionar
 				if dest == port:
 					continue
 				var value: float
-				if needs.has(g) and dest == home:
+				var days := GameData.travel_days(port, dest, sh["type"])
+				var deal := {}
+				for c in sim.open_contracts(dest):
+					if c["good"] == g and int(q["qty"]) >= int(c["qty"]) and int(sim.s["day"]) + days <= int(c["end"]):
+						deal = c
+				if not deal.is_empty():
+					value = float(deal["reward"]) + sim.quote_sell(dest, g, int(q["qty"]) - int(deal["qty"]), hid)["revenue"]
+				elif needs.has(g) and dest == home:
 					var n := mini(int(q["qty"]), int(needs[g]))
 					value = n * float(GameData.GOODS[g]["base"]) * mat_w + sim.quote_sell(dest, g, int(q["qty"]) - n, hid)["revenue"]
 				else:
 					value = sim.quote_sell(dest, g, q["qty"], hid)["revenue"]
-				var days := GameData.travel_days(port, dest, sh["type"])
 				var profit: float = value - q["cost"] - sim.fuel_cost(sh["type"], port, dest)
 				var rate := profit / float(days + 1)
 				if rate > best_rate:
@@ -147,7 +180,25 @@ static func monthly(sim: Sim, hid: String) -> void:
 		var home: String = GameData.HOUSES[hid]["home"]
 		var wl: int = int(sim.s["ports"][home]["workshops"].get(hid, 0))
 		if wl < 3 and h["gold"] > next_cost + sim.workshop_cost(wl, hid) + WORKING_CAPITAL:
-			sim.invest(home, hid)
+			if sim.ws_total(home) < GameData.PORT_WS_CAP:
+				sim.invest(home, hid)
+			else:
+				# home port is full: buy out whoever else holds a share there
+				var target := ""
+				for o in sim.s["ports"][home]["workshops"]:
+					if o != hid and (target == "" or int(sim.s["ports"][home]["workshops"][o]) > int(sim.s["ports"][home]["workshops"][target])):
+						target = o
+				if target != "" and h["gold"] > next_cost + sim.buyout_cost(home, target, hid) + WORKING_CAPITAL:
+					sim.buyout(home, target, hid)
+		# contest the player's strongest foothold now and then
+		elif wl >= 2 and sim.rng.randf() < 0.2:
+			var me := sim.pid()
+			for port in GameData.PORT_IDS:
+				var pl: int = int(sim.s["ports"][port]["workshops"].get(me, 0))
+				if pl >= 2 and sim.patron(port) == me and int(sim.s["ports"][port]["workshops"].get(hid, 0)) < 3:
+					if h["gold"] > next_cost + sim.buyout_cost(port, me, hid) + WORKING_CAPITAL * 1.5:
+						sim.buyout(port, me, hid)
+						break
 	# Keep enough for the next lighthouse stage before expanding.
 	if ships.size() < 3 and h["gold"] > 26000 + 15000:
 		var home: String = GameData.HOUSES[hid]["home"]

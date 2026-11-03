@@ -67,6 +67,10 @@ const LIGHTHOUSE := [
 const WORKSHOP_COST := [8000, 16000, 30000]   # level 1..3
 const WORKSHOP_PROD := [3, 6, 10]             # extra units per day at that level
 const WORKSHOP_DIVIDEND := [250, 600, 1200]   # gold per month at that level
+const PORT_WS_CAP := 4        # workshop levels a port can host across all houses
+const BUYOUT_MULT := 1.6      # price of buying a level from a rival, vs. building it
+const PATRON_FEE := 1.03      # non-patrons pay this much more when buying at a port
+const MAX_CONTRACTS := 3
 
 
 static func good_name(g: String) -> String:

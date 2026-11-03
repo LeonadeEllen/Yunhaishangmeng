@@ -172,6 +172,23 @@ func _draw() -> void:
 		if home_of != "":
 			var col: Color = GameData.HOUSES[home_of]["color"]
 			draw_circle(plate.position + Vector2(plate.size.x + 2, plate.size.y * 0.5), 6.0 * maxf(sc, 0.8), col)
+		var pat := sim.patron(pid)
+		if pat != "":
+			# patron: a coloured band under the name plate
+			draw_rect(Rect2(plate.position + Vector2(4, plate.size.y - 3), Vector2(plate.size.x - 8, 3)), GameData.HOUSES[pat]["color"])
+		var cs := sim.open_contracts(pid)
+		if not cs.is_empty():
+			# contract notice pinned above the island
+			var c: Dictionary = cs[0]
+			var cp := p + Vector2(w * 0.32, -h * 0.42 + bob)
+			var bounce := sin(_t * 3.0) * 2.0
+			var r := 15.0 * maxf(sc, 0.8)
+			draw_circle(cp + Vector2(0, bounce), r + 2.0, UiKit.BRASS)
+			draw_circle(cp + Vector2(0, bounce), r, Color("fff4d6"))
+			var ifs := int(r * 1.2)
+			draw_string(font, cp + Vector2(-ifs * 0.5, ifs * 0.42 + bounce), "委", HORIZONTAL_ALIGNMENT_LEFT, -1, ifs, UiKit.TERRA)
+			if not c["chasers"].is_empty():
+				draw_arc(cp + Vector2(0, bounce), r + 5.0, 0.0, TAU, 24, Color(UiKit.TERRA, 0.5 + 0.4 * sin(_t * 5.0)), 2.0)
 	# near clouds over everything
 	for c in _clouds:
 		if c["r"] <= 90:

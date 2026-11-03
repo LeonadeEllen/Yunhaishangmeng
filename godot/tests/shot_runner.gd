@@ -89,6 +89,18 @@ func run(m: Control) -> void:
 	main._open_port(main.sim.flagship()["port"], 0)
 	await _wait(0.5)
 	await _shot("14c_midgame")
+	while main.sim.open_contracts().size() < 2:
+		main.sim._post_contract()
+	var c0: Dictionary = main.sim.open_contracts()[0]
+	c0["chasers"].append("iron" if main.sim.pid() != "iron" else "tower")
+	main._open_port(main.sim.flagship()["port"], 3)
+	await _wait(0.4)
+	await _shot("14d_contracts")
+	main.sim.house()["gold"] += 60000
+	main.sim.s["ports"]["muxia"]["workshops"] = {"tower": 2, main.sim.pid(): 1}
+	main._open_port("muxia", 2)
+	await _wait(0.4)
+	await _shot("14e_industry")
 	main.sim.s["over"] = null
 	main.sim._end("first_light", "lamp")
 	await _wait(0.4)

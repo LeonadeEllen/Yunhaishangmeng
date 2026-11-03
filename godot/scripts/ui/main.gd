@@ -542,6 +542,8 @@ func _on_port_hovered(pid: String) -> void:
 	var fl := sim.flagship()
 	if not fl.is_empty() and sim.docked(fl) and fl["port"] != pid:
 		v.add_child(UiKit.label("旗舰前往：%d 天 · 燃晶 %d 金" % [GameData.travel_days(fl["port"], pid, fl["type"]), sim.fuel_cost(fl["type"], fl["port"], pid)], 14, UiKit.JADE, true))
+	for c in sim.open_contracts(pid):
+		v.add_child(UiKit.label("委托：%s %d 件 → %s 金（剩 %d 天）" % [GameData.good_name(c["good"]), int(c["qty"]), UiKit.money(c["reward"]), int(c["end"]) - int(sim.s["day"])], 14, UiKit.BRASS, true))
 	var it = sim.s["intel"][pid]
 	if it == null:
 		v.add_child(UiKit.label("尚无行情", 14, UiKit.MUTED))
@@ -640,9 +642,53 @@ func _refresh_side() -> void:
 		4: _tab_lighthouse()
 
 
+func _contract_row(c: Dictionary, fl: Dictionary, show_port: bool) -> Control:
+	var p := PanelContainer.new()
+	p.add_theme_stylebox_override("panel", UiKit.box(Color("f7e7bd"), UiKit.BRASS, 5, 1, 6))
+	var row := HBoxContainer.new()
+	row.add_child(UiKit.icon(UiKit.sprite("goods", GameData.GOODS[c["good"]]["icon"]), 30))
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 0)
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var head := "委托 · %s%s %d 件 · 酬金 %s" % [(GameData.port_name(c["port"]) + " 求购 ") if show_port else "求购 ", GameData.good_name(c["good"]), int(c["qty"]), UiKit.money(c["reward"])]
+	v.add_child(UiKit.label(head, 15, UiKit.INK, true))
+	var sub := "剩 %d 天 · 每件折合 %d 金" % [int(c["end"]) - int(sim.s["day"]), int(c["reward"]) / maxi(1, int(c["qty"]))]
+	var chasers: Array = []
+	for hid in c["chasers"]:
+		chasers.append(GameData.HOUSES[hid]["name"])
+	if not chasers.is_empty():
+		sub += " · %s 已出发" % "、".join(chasers)
+	v.add_child(UiKit.label(sub, 13, UiKit.TERRA if not chasers.is_empty() else UiKit.MUTED))
+	row.add_child(v)
+	var cid: int = c["id"]
+	if show_port:
+		var cp: String = c["port"]
+		row.add_child(UiKit.button("查看", func(): _open_port(cp, 0), true))
+	elif not fl.is_empty():
+		var fid: int = fl["id"]
+		var b := UiKit.button("交付", func(): _deliver_contract(fid, cid))
+		b.disabled = not sim.can_fulfill(fl, c)
+		b.tooltip_text = "旗舰需停在本港，货舱里至少有 %d 件%s。" % [int(c["qty"]), GameData.good_name(c["good"])]
+		row.add_child(b)
+	p.add_child(row)
+	return p
+
+
+func _deliver_contract(ship_id: int, cid: int) -> void:
+	var res := sim.fulfill(ship_id, cid)
+	if res["ok"]:
+		sfx("coin")
+		_float_profit(int(res["profit"]))
+	else:
+		_toast(res["msg"], "bad")
+	_refresh_all()
+
+
 func _tab_trade(here: bool) -> void:
 	var fl := sim.flagship()
 	var intel = sim.s["intel"][_port]
+	for c in sim.open_contracts(_port):
+		side_body.add_child(_contract_row(c, fl, false))
 	if here:
 		var cap := HBoxContainer.new()
 		cap.add_child(UiKit.label("货舱 %d / %d" % [sim.cargo_used(fl), sim.cargo_cap(fl)], 15, UiKit.INK, true))
@@ -796,19 +842,40 @@ func _tab_industry() -> void:
 	var p: Dictionary = GameData.PORTS[_port]
 	var w: Dictionary = sim.s["ports"][_port]["workshops"]
 	var lvl: int = int(w.get(sim.pid(), 0))
-	side_body.add_child(UiKit.label("工坊 · 当前 %d 级" % lvl, 18, UiKit.INK, true))
-	side_body.add_child(UiKit.para("投资工坊会让本港特产（%s、%s）增产、价格更低，每月分红，你在这里买货也更便宜（每级 −2.5%%）。" % [GameData.good_name(p["make"][0]), GameData.good_name(p["make"][1])], 14, UiKit.MUTED))
+	var total := sim.ws_total(_port)
+	var pat := sim.patron(_port)
+	side_body.add_child(UiKit.label("工坊 · 你 %d 级 · 港内名额 %d / %d" % [lvl, total, GameData.PORT_WS_CAP], 18, UiKit.INK, true))
+	side_body.add_child(UiKit.para("工坊让本港特产（%s、%s）增产、变便宜，每月分红，你在这里买货也更便宜（每级 −2.5%%）。工坊最多的商会是港主，其他商会在此买货要多付 3%% 港务费。名额满了只能花 %.1f 倍价钱收购对手的份额。" % [GameData.good_name(p["make"][0]), GameData.good_name(p["make"][1]), GameData.BUYOUT_MULT], 14, UiKit.MUTED))
+	var pl := UiKit.label("港主：%s" % (GameData.HOUSES[pat]["name"] if pat != "" else "无（份额相同或无人投资）"), 16, UiKit.BRASS if pat == sim.pid() else UiKit.INK, true)
+	side_body.add_child(pl)
 	if lvl < 3:
 		var cost: int = sim.workshop_cost(lvl)
 		var b := UiKit.button("升到 %d 级 · %s 金 · 月分红 %d" % [lvl + 1, UiKit.money(cost), int(sim.dividend(lvl, sim.pid()))], func(): _act(sim.invest(_port)))
-		b.disabled = sim.house()["gold"] < cost
+		b.disabled = sim.house()["gold"] < cost or total >= GameData.PORT_WS_CAP
 		side_body.add_child(b)
 	for hid in GameData.HOUSE_IDS:
-		if hid != sim.pid() and int(w.get(hid, 0)) > 0:
-			side_body.add_child(UiKit.label("%s 在此有 %d 级工坊" % [GameData.HOUSES[hid]["name"], int(w[hid])], 14, UiKit.MUTED))
+		if hid == sim.pid() or int(w.get(hid, 0)) <= 0:
+			continue
+		var row := HBoxContainer.new()
+		var l := UiKit.label("%s · %d 级工坊" % [GameData.HOUSES[hid]["name"], int(w[hid])], 15)
+		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(l)
+		var t: String = hid
+		var bc := sim.buyout_cost(_port, hid)
+		var bb := UiKit.button("收购一级 · %s 金" % UiKit.money(bc), func(): _act(sim.buyout(_port, t)), true)
+		bb.disabled = sim.house()["gold"] < bc or lvl >= 3
+		row.add_child(bb)
+		side_body.add_child(row)
 
 
 func _tab_tavern() -> void:
+	side_body.add_child(UiKit.label("委托板", 18, UiKit.INK, true))
+	var cs := sim.open_contracts()
+	if cs.is_empty():
+		side_body.add_child(UiKit.para("眼下没有委托。各港每隔一阵会张贴求购单，先把货送到的商会拿走全部酬金。", 14, UiKit.MUTED))
+	for c in cs:
+		side_body.add_child(_contract_row(c, {}, true))
+	side_body.add_child(HSeparator.new())
 	side_body.add_child(UiKit.label("酒馆", 18, UiKit.INK, true))
 	side_body.add_child(UiKit.para("消息贩子能告诉你所有港口此刻的价格。行情会变，过期的情报要小心。", 14, UiKit.MUTED))
 	var b := UiKit.button("买全部港口行情 · 400 金", func(): _act(sim.buy_intel()))
@@ -930,7 +997,9 @@ func _toast(text: String, kind: String = "info") -> void:
 		sfx("gong")
 	if kind == "month":
 		return
-	var col: Color = {"info": UiKit.INK, "good": UiKit.JADE, "bad": UiKit.TERRA, "major": UiKit.BRASS}.get(kind, UiKit.INK)
+	if kind == "contract":
+		sfx("bell")
+	var col: Color = {"info": UiKit.INK, "good": UiKit.JADE, "bad": UiKit.TERRA, "major": UiKit.BRASS, "contract": UiKit.BRASS, "rival": Color("8a5a7a")}.get(kind, UiKit.INK)
 	var p := PanelContainer.new()
 	p.add_theme_stylebox_override("panel", UiKit.box(Color(UiKit.PARCH, 0.97), col, 6, 2, 10))
 	var l := UiKit.para(text, 15, UiKit.INK)
@@ -1110,8 +1179,13 @@ func _show_ledger() -> void:
 	var lines := [
 		"金币 %s · 欠款 %s · 净资产 %s" % [UiKit.money(h["gold"]), UiKit.money(h["debt"]), UiKit.money(sim.net_worth())],
 		"上月净收支 %+s · 每月固定开支约 %s（薪水、维护、利息）" % [UiKit.money(h.get("last_net", 0.0)), UiKit.money(h.get("last_upkeep", 0.0))],
-		"累计成交 %d 笔 · 累计利润 %s · 最佳单笔 %s" % [sim.s["stats"]["trades"], UiKit.money(sim.s["stats"]["profit"]), UiKit.money(sim.s["stats"]["best_trade"])],
+		"累计成交 %d 笔 · 累计利润 %s · 最佳单笔 %s · 完成委托 %d 单" % [sim.s["stats"]["trades"], UiKit.money(sim.s["stats"]["profit"]), UiKit.money(sim.s["stats"]["best_trade"]), int(sim.s["stats"].get("contracts", 0))],
 	]
+	var pats: Array = []
+	for port in GameData.PORT_IDS:
+		if sim.patron(port) == sim.pid():
+			pats.append(GameData.port_name(port))
+	lines.append("你是港主的港口：%s" % ("、".join(pats) if not pats.is_empty() else "暂无"))
 	for hid in GameData.HOUSE_IDS:
 		if hid != sim.pid():
 			lines.append("%s：%d 艘船 · 灯塔 %d/3%s" % [GameData.HOUSES[hid]["name"], sim.ships_of(hid).size(), sim.house(hid)["lh"]["stage"], " · 已破产" if sim.house(hid)["bankrupt"] else ""])

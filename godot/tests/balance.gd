@@ -8,6 +8,14 @@ func _init() -> void:
 		var sim := Sim.new()
 		sim.new_game(sd)
 		var stage_day := {}
+		var won := {}
+		var buys := 0
+		sim.message.connect(func(t: String, k: String):
+			for hid in GameData.HOUSE_IDS:
+				if t.begins_with(GameData.HOUSES[hid]["name"] + " 完成了"):
+					won[hid] = int(won.get(hid, 0)) + 1
+			if "收购" in t:
+				buys += 1)
 		while sim.s["over"] == null:
 			if sim.s["event"] != null:
 				EventBook.resolve(sim, 0)
@@ -27,6 +35,6 @@ func _init() -> void:
 			var stg := []
 			for i in [1, 2, 3]:
 				stg.append(str(stage_day.get("%s%d" % [hid, i], "-")))
-			row.append("%s[%s] %dk" % [hid, ",".join(stg), int(sim.house(hid)["gold"] / 1000.0)])
-		print("seed %d  %-12s y%.1f  %s" % [sd, o["kind"], float(o["day"]) / 360.0, "  ".join(row)])
+			row.append("%s[%s] %dk c%d" % [hid, ",".join(stg), int(sim.house(hid)["gold"] / 1000.0), int(won.get(hid, 0))])
+		print("seed %d  %-12s y%.1f  %s" % [sd, o["kind"], float(o["day"]) / 360.0, "  ".join(row) + "  buyouts %d open %d" % [buys, sim.s["contracts"].size()]])
 	quit()
