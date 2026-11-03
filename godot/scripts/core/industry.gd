@@ -499,5 +499,8 @@ static func ai_build(sim: Sim, hid: String, budget: float) -> void:
 	if best.is_empty():
 		return
 	var r := build(sim, best["port"], best["idx"], best["g"], hid)
-	if r["ok"] and best["port"] == home:
-		sim.s["ports"][home]["plots"][best["idx"]]["out_mode"] = "lh"
+	if r["ok"]:
+		var pl: Dictionary = sim.s["ports"][best["port"]]["plots"][best["idx"]]
+		# the bot has no hands to empty its warehouse: sell at the gate like a rival does
+		pl["in_mode"] = "buy"
+		pl["out_mode"] = "lh" if best["port"] == home else "sell"
