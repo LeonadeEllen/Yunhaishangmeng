@@ -4,6 +4,7 @@ extends Control
 const SAVE_PATH := "user://save.json"
 const SPEEDS := [0, 1, 3, 8]          # days per second
 const MapView := preload("res://scripts/ui/map_view.gd")
+const TownView := preload("res://scripts/ui/town_view.gd")
 
 var sim: Sim
 var speed_idx := 1
@@ -21,9 +22,13 @@ var _crown_seen := false
 var _trade_mode := 0      # 0 fleet<->market, 1 post<->market, 2 fleet<->post
 var _trade_qty := 10
 var _build_plot := -1
+var _in_town := false
+var _town_kind := ""        # building the protagonist is standing in ("" = street)
 
 # nodes
 var map: Control
+var town: Control
+var hero_btn: Button
 var hud: Control
 var top_gold: Label
 var top_net: Label
@@ -200,6 +205,8 @@ func _show_help() -> void:
 		"· 低买高卖：每座城天然出产两种招牌货（便宜），常年需要三四种货（昂贵）。同一条路线跑多了，价格会被你自己压平。",
 		"· 名声：赚钱、完成委托、建工坊都会提升名声。名声等级决定你能买几艘船、能不能开商馆、能买哪一阶图纸。",
 		"· 产业：在城主府买地契、在工匠行会买图纸，然后在商馆页的地块上建工坊。原料 → 加工品 → 精品，越高阶利润越厚。",
+		"· 城镇：旗舰进港后会走进城里。WASD 走动，点建筑进门办事，Esc 回到海图。路人会透露行情。",
+		"· 主角：卖货、航行、委托和建坊都涨经验，升级得能力点，点顶栏的名字分配到航海 / 交易 / 魅力。",
 		"· 时间：空格暂停，1/2/3 切换速度。旗舰抵港时自动暂停。",
 		"· 灯塔：三层灯塔是云海盟主的象征，不建也可以一直玩下去。金币为负超过 30 天会破产。",
 	], [["明白了", func(): _close_modal()]])
@@ -252,6 +259,16 @@ func _build_game() -> void:
 	map.port_clicked.connect(_on_port_clicked)
 	map.port_hovered.connect(_on_port_hovered)
 	add_child(map)
+	town = TownView.new()
+	town.sim = sim
+	town.set_anchors_preset(Control.PRESET_FULL_RECT)
+	town.offset_top = 64
+	town.offset_right = -572
+	town.visible = false
+	town.building_entered.connect(_on_building_entered)
+	add_child(town)
+	_in_town = false
+	_town_kind = ""
 	_build_topbar()
 	# side panel
 	side = PanelContainer.new()
@@ -334,6 +351,9 @@ func _build_topbar() -> void:
 	h.add_child(gold_box)
 	top_debt = UiKit.label("", 15, Color("f2b8a6"))
 	h.add_child(top_debt)
+	hero_btn = UiKit.button("", _show_hero, true)
+	hero_btn.tooltip_text = "主角能力与经验"
+	h.add_child(hero_btn)
 	var sp := Control.new()
 	sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	h.add_child(sp)
@@ -391,6 +411,7 @@ func _after_day() -> bool:
 		sfx("bell")
 		_set_speed(0)
 		_open_port(fl["port"], 0)
+		_enter_town()
 		stop = true
 	_flag_docked = now_docked
 	if int(sim.house()["lh"]["stage"]) > _lh_seen:
@@ -434,6 +455,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		KEY_ESCAPE:
 			if _modal_open:
 				_close_modal()
+			elif _in_town:
+				_leave_town()
+		KEY_E:
+			if _in_town and not _modal_open:
+				town.try_enter()
 
 
 func _set_speed(i: int) -> void:
@@ -469,6 +495,13 @@ func _refresh_top() -> void:
 	top_net.add_theme_color_override("font_color", Color("a8dcb8") if net >= 0 else Color("f2b8a6"))
 	top_debt.text = ("欠款 %s" % UiKit.money(h["debt"])) if h["debt"] > 0.5 else ""
 	top_date.text = GameData.date_text(sim.s["day"])
+	var hero: Dictionary = sim.hero()
+	hero_btn.text = "%s · %d 级%s" % [GameData.HOUSES[sim.pid()]["leader"], int(hero["lvl"]), (" · %d 点待分配" % int(hero["pts"])) if int(hero["pts"]) > 0 else ""]
+	if int(hero["pts"]) > 0 and not hero_btn.has_meta("pulsing"):
+		hero_btn.set_meta("pulsing", true)
+		_pulse(hero_btn)
+	elif int(hero["pts"]) == 0 and hero_btn.has_meta("pulsing"):
+		hero_btn.remove_meta("pulsing")
 	var lvl := sim.rep_level()
 	var pts := int(h["rep"])
 	if lvl < 6:
@@ -559,7 +592,7 @@ func _on_port_hovered(pid: String) -> void:
 	v.add_child(UiKit.label(GameData.port_name(pid), 18, UiKit.INK, true))
 	var fl := sim.flagship()
 	if not fl.is_empty() and sim.docked(fl) and fl["port"] != pid:
-		v.add_child(UiKit.label("旗舰前往：%d 天 · 补给 %d 金" % [GameData.travel_days(fl["port"], pid, fl["type"]), sim.fuel_cost(fl["type"], fl["port"], pid)], 14, UiKit.JADE, true))
+		v.add_child(UiKit.label("旗舰前往：%d 天 · 补给 %d 金" % [sim.travel_days(fl["port"], pid, fl["type"]), sim.fuel_cost_for(fl, pid)], 14, UiKit.JADE, true))
 	for c in sim.open_contracts(pid):
 		v.add_child(UiKit.label("委托：%s %d 件 → %s 金（剩 %d 天）" % [GameData.good_name(c["good"]), int(c["qty"]), UiKit.money(c["reward"]), int(c["end"]) - int(sim.s["day"])], 14, UiKit.BRASS, true))
 	var it = sim.s["intel"][pid]
@@ -594,7 +627,41 @@ func _open_port(pid: String, tab: int = -1) -> void:
 	if tab >= 0:
 		_tab = tab
 	map.selected_port = pid
+	if _in_town and pid != town.port:
+		_leave_town()
 	_refresh_side()
+
+
+## Step off the flagship into the town of the port it is docked at.
+func _enter_town() -> void:
+	var fl := sim.flagship()
+	if fl.is_empty() or not sim.docked(fl):
+		return
+	_port = fl["port"]
+	map.selected_port = _port
+	_in_town = true
+	_town_kind = ""
+	town.open(_port)
+	town.visible = true
+	map.visible = false
+	_refresh_side()
+
+
+func _leave_town() -> void:
+	_in_town = false
+	_town_kind = ""
+	town.visible = false
+	map.visible = true
+	_refresh_side()
+
+
+func _on_building_entered(kind: String) -> void:
+	sfx("page")
+	_town_kind = kind
+	_tab = town.tab_of(kind)
+	_build_plot = -1
+	_refresh_side()
+
 
 
 func _refresh_side() -> void:
@@ -629,9 +696,23 @@ func _refresh_side() -> void:
 	hv.add_child(tags)
 	head.add_child(hv)
 	side_body.add_child(head)
+	if here:
+		var tb := HBoxContainer.new()
+		tb.add_theme_constant_override("separation", 6)
+		if _in_town:
+			tb.add_child(UiKit.button("回到海图（Esc）", _leave_town, true))
+			if _town_kind != "":
+				tb.add_child(UiKit.button("走出%s" % town.kind_name(_town_kind), func(): _town_kind = ""; _refresh_side(), true))
+		else:
+			var eb := UiKit.button("进城 · 在街上走走", _enter_town)
+			eb.tooltip_text = "进入 %s 的街道，点建筑办事。" % p["name"]
+			tb.add_child(eb)
+		side_body.add_child(tb)
+		if _in_town and _town_kind != "":
+			side_body.add_child(_interior_strip(_town_kind))
 	if not fl.is_empty() and sim.docked(fl) and not here:
-		var days := GameData.travel_days(fl["port"], _port, fl["type"])
-		var fc := sim.fuel_cost(fl["type"], fl["port"], _port)
+		var days := sim.travel_days(fl["port"], _port, fl["type"])
+		var fc := sim.fuel_cost_for(fl, _port)
 		var go := UiKit.button("旗舰起航前往此港 · %d 天 · 补给 %d 金" % [days, fc], func(): _sail(_port))
 		if _tut_step() == 1 and _port == _tutorial_goal()["dest"]:
 			_pulse(go)
@@ -703,6 +784,97 @@ func _deliver_contract(ship_id: int, cid: int) -> void:
 	else:
 		_toast(res["msg"], "bad")
 	_refresh_all()
+
+
+## The counter inside a building: a portrait, a name and one line of greeting (大航海时代2 style).
+func _interior_strip(kind: String) -> Control:
+	var box := PanelContainer.new()
+	box.add_theme_stylebox_override("panel", UiKit.box(Color("fbf5e6"), Color(UiKit.BRASS, 0.6), 8, 1, 10))
+	var hb := HBoxContainer.new()
+	hb.add_theme_constant_override("separation", 10)
+	box.add_child(hb)
+	var pidx: int = town.npc_portrait(kind)
+	if pidx < 0:
+		pidx = GameData.HOUSES[sim.pid()]["portrait"]
+	hb.add_child(UiKit.icon(UiKit.sprite("leaders", pidx), 72))
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 2)
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	v.add_child(UiKit.label("%s · %s" % [town.kind_name(kind), town.npc_title(kind)], 15, UiKit.INK, true))
+	var line := UiKit.para(_greeting(kind), 14)
+	v.add_child(line)
+	hb.add_child(v)
+	return box
+
+
+func _greeting(kind: String) -> String:
+	var p: Dictionary = GameData.PORTS[_port]
+	var f := sim.friend_level(_port)
+	var leader: String = GameData.HOUSES[sim.pid()]["leader"]
+	var warm := f >= 2
+	match kind:
+		"trade":
+			var best := ""
+			var best_r := 0.0
+			for g in GameData.GOOD_IDS:
+				var r := float(sim.sell_price(_port, g)) / float(GameData.GOODS[g]["base"])
+				if r > best_r:
+					best_r = r
+					best = g
+			return ("%s来了，今天%s收得最急。" % [leader, GameData.good_name(best)]) if warm else ("客官要买什么？今天%s行情最高。" % GameData.good_name(best))
+		"yard":
+			return "船要修要买都找我。名声到「%s」才能添第 %d 艘。" % [GameData.REP_NAMES[mini(sim.rep_level(), 5)], sim.max_ships() + 1] if sim.ships_of().size() >= sim.max_ships() else "新船随时能交付，%s，看看哪艘合眼缘。" % leader
+		"post":
+			return "账房见过少主。仓库 %d / %d，工坊 %d 座。" % [Industry.wh_used(sim, _port, sim.pid()), Industry.wh_cap(sim, _port, sim.pid()), Industry.count_buildings(sim, _port, sim.pid())] if Industry.has_wh(sim, _port, sim.pid()) else "这里还没有你的商馆。开了商馆，货和工坊才有地方落脚。"
+		"hall":
+			return ("%s商会的朋友，本城的地契可以谈。" % GameData.HOUSES[sim.pid()]["name"]) if warm else ("%s？没怎么听过。多在本城做些买卖再来。" % GameData.HOUSES[sim.pid()]["name"])
+		"guild":
+			return "图纸不外传，除非你证明经手过足够的料。" if sim.rep_level() < 3 else "行首请看，工艺图纸都在墙上。"
+		"tavern":
+			return "来壶霞果酒？委托板在那边，消息也有的是。"
+		"bank":
+			return "存取借贷都在这里办，利息按月算。"
+		"lighthouse":
+			return "工地就等物资和金子了。" if sim.house()["lh"]["stage"] < 3 else "灯冠亮着呢，少主。"
+	return "欢迎来到%s。" % p["name"]
+
+
+func _show_hero() -> void:
+	var hero: Dictionary = sim.hero()
+	var d: Dictionary = GameData.HOUSES[sim.pid()]
+	var v := _modal("%s · %d 级" % [d["leader"], int(hero["lvl"])], "", [
+		"经验 %d / %d · 航行 %d 天 · 到过 %d 座城" % [int(hero["exp"]), GameData.hero_exp_needed(int(hero["lvl"])), int(hero["days_sailed"]), hero["visited"].size()],
+		("有 %d 点能力点可以分配。" % int(hero["pts"])) if int(hero["pts"]) > 0 else "做买卖、跑航程、完成委托和建工坊都会积累经验。",
+	], [["关闭", func(): _close_modal()]], 560)
+	var grid := GridContainer.new()
+	grid.columns = 3
+	grid.add_theme_constant_override("h_separation", 10)
+	grid.add_theme_constant_override("v_separation", 6)
+	for k in GameData.HERO_ABIL:
+		var kk: String = k
+		var lvl := sim.hero_abil(k)
+		var nl := UiKit.label("%s %d" % [GameData.HERO_ABIL_NAMES[k], lvl], 16, UiKit.INK, true)
+		nl.custom_minimum_size = Vector2(90, 0)
+		grid.add_child(nl)
+		var dl := UiKit.label(GameData.HERO_ABIL_DESC[k], 13, UiKit.MUTED)
+		dl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		grid.add_child(dl)
+		var b := UiKit.button("+1", func(): _act(sim.spend_hero_pt(kk)); _close_modal(); _show_hero(), false)
+		b.disabled = int(hero["pts"]) <= 0 or lvl >= GameData.HERO_MAX_ABIL
+		grid.add_child(b)
+	var top := HBoxContainer.new()
+	top.add_theme_constant_override("separation", 12)
+	top.add_child(UiKit.icon(UiKit.sprite("leaders", d["portrait"]), 110))
+	var tv := VBoxContainer.new()
+	tv.add_theme_constant_override("separation", 4)
+	tv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	tv.add_child(UiKit.label("%s当家 · 母港 %s" % [d["name"], GameData.port_name(d["home"])], 14, UiKit.MUTED))
+	tv.add_child(UiKit.para(d["pitch"], 13))
+	top.add_child(tv)
+	v.add_child(top)
+	v.move_child(top, 1)
+	v.add_child(grid)
+	v.move_child(grid, v.get_child_count() - 2)
 
 
 func _tab_trade(here: bool) -> void:
@@ -1305,6 +1477,8 @@ func _sail(dest: String) -> void:
 	if res["ok"]:
 		sfx("sail")
 		_flag_docked = false
+		if _in_town:
+			_leave_town()
 		if speed_idx == 0:
 			_set_speed(1)
 

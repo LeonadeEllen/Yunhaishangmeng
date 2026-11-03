@@ -214,6 +214,8 @@ static func build(sim: Sim, pid: String, i: int, g: String, hid: String = "") ->
 	var mine := hid == sim.pid()
 	sim.s["ports"][pid]["plots"][i] = {"b": g, "lvl": 1, "owner": hid, "in_mode": "wh" if mine else "buy", "out_mode": "wh" if mine else "sell", "status": "ok"}
 	sim.add_rep(hid, 20)
+	if hid == sim.pid():
+		sim.add_exp(50)
 	var msg := "%s 在 %s 建起了%s工坊。" % [GameData.HOUSES[hid]["name"], GameData.port_name(pid), GameData.good_name(g)]
 	if not mine:
 		sim._say(msg, "rival")

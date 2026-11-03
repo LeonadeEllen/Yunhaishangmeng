@@ -45,7 +45,16 @@ func run(m: Control) -> void:
 				main._close_modal()
 		if main.sim.docked(main.sim.flagship()) and main.speed_idx == 0:
 			break
-	await _shot("07_arrived")
+	await _shot("07_arrived_town")
+	main.town._enter("trade")
+	await _wait(0.3)
+	await _shot("07b_inside_trade")
+	main.sim.add_exp(400)
+	main._refresh_top()
+	main._show_hero()
+	await _wait(0.3)
+	await _shot("07c_hero")
+	main._close_modal()
 	main._trade(false, "silk", 9999)
 	await _wait(0.4)
 	await _shot("08_sold")

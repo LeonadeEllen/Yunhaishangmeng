@@ -63,10 +63,57 @@ func add_friend(port: String, hid: String, pts: int) -> void:
 		return
 	var f: Dictionary = s["ports"][port]["friend"]
 	var before := GameData.friend_level(int(f.get(hid, 0)))
+	if hid == pid():
+		pts = int(ceil(float(pts) * (1.0 + 0.1 * float(hero_abil("charm") - 1))))
 	f[hid] = int(f.get(hid, 0)) + pts
 	var after := GameData.friend_level(int(f[hid]))
 	if after > before and hid == pid():
 		_say("%s 对你的看法变为「%s」。" % [GameData.port_name(port), GameData.FRIEND_NAMES[after]], "good")
+
+
+# ------------------------------------------------------------------ protagonist
+func hero() -> Dictionary:
+	return s["hero"]
+
+
+func hero_abil(k: String) -> int:
+	return int(s["hero"]["abil"].get(k, 1))
+
+
+## Experience from trading, sailing, contracts and building. Levels grant one ability point.
+func add_exp(n: int) -> void:
+	if n <= 0:
+		return
+	var h: Dictionary = s["hero"]
+	h["exp"] = int(h["exp"]) + n
+	while int(h["lvl"]) < GameData.HERO_MAX_LVL and int(h["exp"]) >= GameData.hero_exp_needed(int(h["lvl"])):
+		h["exp"] = int(h["exp"]) - GameData.hero_exp_needed(int(h["lvl"]))
+		h["lvl"] = int(h["lvl"]) + 1
+		h["pts"] = int(h["pts"]) + 1
+		_say("%s 升到 %d 级，获得 1 点能力点。" % [GameData.HOUSES[pid()]["leader"], int(h["lvl"])], "good")
+
+
+func spend_hero_pt(k: String) -> Dictionary:
+	var h: Dictionary = s["hero"]
+	if int(h["pts"]) <= 0:
+		return _fail("没有可用的能力点。")
+	if not GameData.HERO_ABIL.has(k):
+		return _fail("没有这项能力。")
+	if int(h["abil"][k]) >= GameData.HERO_MAX_ABIL:
+		return _fail("这项能力已经满级。")
+	h["pts"] = int(h["pts"]) - 1
+	h["abil"][k] = int(h["abil"][k]) + 1
+	return {"ok": true, "msg": "%s提升到 %d。" % [GameData.HERO_ABIL_NAMES[k], int(h["abil"][k])]}
+
+
+## Travel time for a house's ship; the protagonist's seamanship shortens the player's voyages.
+func travel_days(from: String, to: String, type: String, hid: String = "") -> int:
+	if hid == "":
+		hid = pid()
+	var d := GameData.travel_days(from, to, type)
+	if hid == pid():
+		d = maxi(1, int(roundf(float(d) * (1.0 - 0.03 * float(hero_abil("sail") - 1)))))
+	return d
 
 
 func has_bp(good: String, hid: String = "") -> bool:
@@ -90,6 +137,7 @@ func new_game(seed_value: int = 0, player: String = "lamp", difficulty: int = 1)
 		"ports": {}, "houses": {}, "ships": [], "intel": {}, "log": [],
 		"event": null, "story": 0, "stats": {"trades": 0, "profit": 0, "best_trade": 0, "handled": {}, "contracts": 0},
 		"crown": null,
+		"hero": {"lvl": 1, "exp": 0, "pts": 0, "abil": {"sail": 1, "trade": 1, "fight": 1, "charm": 1}, "days_sailed": 0, "visited": {}},
 		"tutorial": 0, "player": player, "fashion": null, "difficulty": difficulty,
 		"contracts": [], "next_contract_id": 1,
 	}
@@ -200,7 +248,10 @@ func unit_price(port: String, good: String, stock_override: float = -1.0) -> flo
 
 func _discount(hid: String, port: String) -> float:
 	var pat := patron(port)
-	return GameData.PATRON_FEE if pat != "" and pat != hid else 1.0
+	var d := GameData.PATRON_FEE if pat != "" and pat != hid else 1.0
+	if hid == pid():
+		d *= 1.0 - 0.01 * float(hero_abil("trade") - 1)
+	return d
 
 
 ## The house with the most buildings in a port (ties: nobody). Others pay a harbour fee there.
@@ -235,6 +286,8 @@ func _sell_mult(hid: String) -> float:
 	var m := 0.94 * (1.05 if perk(hid) == "sell" else 1.0)
 	if hid != pid():
 		m *= AI_BONUS[clampi(int(s.get("difficulty", 1)), 0, 2)]
+	else:
+		m *= 1.0 + 0.01 * float(hero_abil("trade") - 1)
 	return m
 
 
@@ -299,6 +352,11 @@ func est_sell(port: String, good: String, qty: int, hid: String) -> Dictionary:
 
 func fuel_cost(type: String, from: String, to: String) -> int:
 	return GameData.travel_days(from, to, type) * int(GameData.SHIPS[type]["fuel_day"]) * GameData.FUEL_PRICE
+
+
+## Supplies for one of the player's own voyages (shorter trips burn less).
+func fuel_cost_for(sh: Dictionary, to: String) -> int:
+	return travel_days(sh["port"], to, sh["type"], sh["owner"]) * int(GameData.SHIPS[sh["type"]]["fuel_day"]) * GameData.FUEL_PRICE
 
 
 func net_worth(hid: String = "") -> float:
@@ -391,6 +449,7 @@ func sell(ship_id: int, good: String, qty: int) -> Dictionary:
 		s["stats"]["best_trade"] = maxi(int(s["stats"]["best_trade"]), profit)
 		_note_trade(sh["port"], good, qty)
 		add_rep(pid(), profit / 60)
+		add_exp(maxi(profit, 0) / 40)
 		_update_intel(sh["port"])
 	else:
 		add_rep(sh["owner"], profit / 60)
@@ -410,7 +469,7 @@ func depart(ship_id: int, dest: String) -> Dictionary:
 	if dest == sh["port"] or not GameData.PORTS.has(dest):
 		return _fail("目的地无效。")
 	var h := house(sh["owner"])
-	var fc := fuel_cost(sh["type"], sh["port"], dest)
+	var fc := fuel_cost_for(sh, dest)
 	if h["gold"] < fc:
 		return _fail("补给费用 %d 金，金币不足。" % fc)
 	h["gold"] -= fc
@@ -418,7 +477,7 @@ func depart(ship_id: int, dest: String) -> Dictionary:
 	sh["from"] = sh["port"]
 	sh["to"] = dest
 	sh["depart"] = s["day"]
-	sh["arrive"] = s["day"] + GameData.travel_days(sh["port"], dest, sh["type"])
+	sh["arrive"] = s["day"] + travel_days(sh["port"], dest, sh["type"], sh["owner"])
 	sh["port"] = ""
 	if sh["owner"] == pid() and sh["flagship"]:
 		s["sailed"] = true
@@ -658,6 +717,7 @@ func fulfill(ship_id: int, cid: int) -> Dictionary:
 		s["stats"]["profit"] = int(s["stats"]["profit"]) + profit
 		s["stats"]["contracts"] = int(s["stats"].get("contracts", 0)) + 1
 		add_friend(c["port"], hid, 60)
+		add_exp(60)
 	var msg := "%s 完成了 %s 的委托（%s %d 件），获得 %d 金。" % [GameData.HOUSES[hid]["name"], GameData.port_name(c["port"]), GameData.good_name(c["good"]), int(c["qty"]), int(c["reward"])]
 	_say(msg, "good" if hid == pid() else "major")
 	return {"ok": true, "msg": msg, "profit": profit}
@@ -937,6 +997,12 @@ func _tick_ships() -> void:
 func _on_arrive(sh: Dictionary) -> void:
 	if sh["owner"] == pid():
 		_update_intel(sh["port"])
+		if sh["flagship"]:
+			var hero: Dictionary = s["hero"]
+			hero["days_sailed"] = int(hero["days_sailed"]) + int(sh["arrive"]) - int(sh["depart"])
+			var first: bool = not hero["visited"].has(sh["port"])
+			hero["visited"][sh["port"]] = true
+			add_exp((int(sh["arrive"]) - int(sh["depart"])) * 3 + (40 if first else 0))
 		if sh["route"] != null:
 			_run_route(sh)
 		elif sh["flagship"]:
@@ -1098,6 +1164,12 @@ func from_json(text: String) -> bool:
 		s[k] = int(s[k])
 	if s["crown"] != null:
 		s["crown"]["day"] = int(s["crown"]["day"])
+	if not s.has("hero"):
+		s["hero"] = {"lvl": 1, "exp": 0, "pts": 0, "abil": {"sail": 1, "trade": 1, "fight": 1, "charm": 1}, "days_sailed": 0, "visited": {}}
+	for k in ["lvl", "exp", "pts", "days_sailed"]:
+		s["hero"][k] = int(s["hero"][k])
+	for k in s["hero"]["abil"]:
+		s["hero"]["abil"][k] = int(s["hero"]["abil"][k])
 	for g in s["stats"]["handled"]:
 		s["stats"]["handled"][g] = int(s["stats"]["handled"][g])
 	for sh in s["ships"]:

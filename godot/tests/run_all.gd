@@ -12,6 +12,7 @@ func _init() -> void:
 	test_idle_player_goes_bankrupt()
 	test_contracts_and_buyout()
 	test_production_chain()
+	test_hero()
 	var seeds := [11, 22, 33, 44, 55]
 	var crowns := 0
 	var bot_stage := 0
@@ -123,6 +124,39 @@ func test_production_chain() -> void:
 	var json := sim.to_json()
 	var sim2 := Sim.new()
 	check(sim2.from_json(json) and sim2.s["ports"][port]["plots"][1]["b"] == "steel" and sim2.house()["bp"].has("steel"), "buildings and blueprints survive save/load")
+
+
+func test_hero() -> void:
+	print("protagonist")
+	var sim := Sim.new()
+	sim.new_game(5)
+	var d0 := sim.travel_days("qianqi", "chishi", "freighter")
+	var b0 := sim.buy_price("qianqi", "silk")
+	var s0 := sim.sell_price("qianqi", "silk")
+	sim.add_exp(99)
+	check(int(sim.hero()["lvl"]) == 1 and int(sim.hero()["pts"]) == 0, "99 exp is not yet level 2")
+	sim.add_exp(1)
+	check(int(sim.hero()["lvl"]) == 2 and int(sim.hero()["pts"]) == 1, "100 exp reaches level 2 with one point")
+	check(not sim.spend_hero_pt("nope")["ok"], "unknown ability is refused")
+	check(sim.spend_hero_pt("trade")["ok"] and sim.hero_abil("trade") == 2, "point goes into trading")
+	check(not sim.spend_hero_pt("trade")["ok"], "no second point to spend")
+	check(sim.buy_price("qianqi", "silk") <= b0 and sim.sell_price("qianqi", "silk") >= s0, "trading skill tightens the spread (%d/%d -> %d/%d)" % [b0, s0, sim.buy_price("qianqi", "silk"), sim.sell_price("qianqi", "silk")])
+	sim.hero()["abil"]["sail"] = 6
+	check(sim.travel_days("qianqi", "chishi", "freighter") < d0, "seamanship shortens voyages (%d -> %d)" % [d0, sim.travel_days("qianqi", "chishi", "freighter")])
+	check(sim.travel_days("qianqi", "chishi", "freighter", "iron") == d0, "rivals keep the plain travel time")
+	var fl := sim.flagship()
+	sim.depart(fl["id"], "chishi")
+	for i in 30:
+		if sim.s["event"] != null:
+			EventBook.resolve(sim, 0)
+		sim.advance_day()
+	check(sim.docked(fl) and hero_visited(sim, "chishi"), "arriving logs the visit and grants experience (exp %d)" % int(sim.hero()["exp"]))
+	var sim2 := Sim.new()
+	check(sim2.from_json(sim.to_json()) and sim2.hero_abil("sail") == 6 and int(sim2.hero()["lvl"]) == 2, "hero survives save/load")
+
+
+func hero_visited(sim: Sim, port: String) -> bool:
+	return sim.hero()["visited"].has(port)
 
 
 func test_price_feedback() -> void:

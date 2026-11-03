@@ -149,6 +149,24 @@ const HOUSES := {
 const HOUSE_IDS := ["lamp", "iron", "tower"]
 const PLAYER := "lamp"
 
+# ------------------------------------------------------------------ protagonist
+const HERO_ABIL := ["sail", "trade", "fight", "charm"]
+const HERO_ABIL_NAMES := {"sail": "航海", "trade": "交易", "fight": "战斗", "charm": "魅力"}
+const HERO_ABIL_DESC := {
+	"sail": "每级航程缩短 3%，补给随之减少。",
+	"trade": "每级买价便宜 1%，卖价高 1%。",
+	"fight": "空战时的指挥点与士气（第 8 轮启用）。",
+	"charm": "每级在各城积累友好度快 10%。",
+}
+const HERO_MAX_ABIL := 10
+const HERO_MAX_LVL := 20
+
+
+## Experience needed to go from level lvl to lvl + 1.
+static func hero_exp_needed(lvl: int) -> int:
+	return 100 + 60 * (lvl - 1) * (lvl - 1)
+
+
 const LIGHTHOUSE := [
 	{"name": "基座", "gold": 40000,  "mats": {"stone": 120, "steel": 60}, "days": 120, "sprite": 1, "rep": 1},
 	{"name": "灯廊", "gold": 300000, "mats": {"glass": 160, "canvas": 120}, "days": 240, "sprite": 3, "rep": 5},
