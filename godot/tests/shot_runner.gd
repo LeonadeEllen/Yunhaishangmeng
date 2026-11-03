@@ -95,6 +95,8 @@ func run(m: Control) -> void:
 	for i in 150:
 		if main.sim.s["event"] != null:
 			EventBook.resolve(main.sim, 0)
+		if main.sim.s["encounter"] != null:
+			main.sim.auto_encounter()
 		main.sim.advance_day()
 	main.sim.s["frac"] = 0.3
 	main._refresh_all()
@@ -143,6 +145,42 @@ func run(m: Control) -> void:
 	await _wait(0.4)
 	await _shot("14i_route_dialog")
 	main._close_modal()
+	# encounter + battle
+	main.sim.house()["gold"] += 20000
+	main.sim.add_exp(3000)
+	main.sim.s["hero"]["abil"]["fight"] = 5
+	main.sim.start_encounter("pirates")
+	main._show_encounter()
+	await _wait(0.4)
+	await _shot("16_encounter")
+	main._close_modal()
+	main.sim.encounter_fight()
+	main._open_battle()
+	for i in 60:
+		await _wait(0.2)
+		var cu: Dictionary = main.battle_view.battle.current()
+		if not cu.is_empty() and int(cu["side"]) == 0 and main.battle_view._anim.is_empty() and main.battle_view._events.is_empty():
+			break
+	await _wait(0.3)
+	await _shot("16b_battle")
+	main.battle_view.auto = true
+	await _wait(5.0)
+	main.battle_view.auto = false
+	main.battle_view._refresh_panel()
+	await _wait(0.3)
+	await _shot("16c_battle_mid")
+	main.battle_view.auto = true
+	for i in 300:
+		await _wait(0.2)
+		if not main.battle_view.visible:
+			break
+	await _wait(0.4)
+	await _shot("16d_battle_result")
+	main._close_modal()
+	main.sim._post_bounty()
+	main._open_port(main.sim.flagship()["port"], 5)
+	await _wait(0.3)
+	await _shot("16e_bounty")
 	main.sim.s["crown"] = {"hid": main.sim.pid(), "day": main.sim.s["day"]}
 	main._crown_celebration()
 	await _wait(0.4)

@@ -115,6 +115,7 @@ func travel_days(from: String, to: String, type: String, hid: String = "", sh: D
 		d /= speed_mult(sh)
 	if hid == pid():
 		d *= 1.0 - 0.03 * float(hero_abil("sail") - 1)
+	d *= GameData.wind_factor(from, to, int(s.get("day", 0)))
 	return maxi(1, int(roundf(d)))
 
 
@@ -150,6 +151,7 @@ func new_game(seed_value: int = 0, player: String = "lamp", difficulty: int = 1)
 		"hero": {"lvl": 1, "exp": 0, "pts": 0, "abil": {"sail": 1, "trade": 1, "fight": 1, "charm": 1}, "days_sailed": 0, "visited": {}},
 		"tutorial": 0, "player": player, "fashion": null, "difficulty": difficulty,
 		"contracts": [], "next_contract_id": 1,
+		"encounter": null, "battle": null, "battle_result": null,
 	}
 	for pid in GameData.PORT_IDS:
 		var p: Dictionary = GameData.PORTS[pid]
@@ -194,7 +196,7 @@ func _add_ship(hid: String, type: String, port: String, ship_name: String = "") 
 		"id": id, "owner": hid, "type": type, "name": ship_name, "port": port,
 		"from": port, "to": "", "depart": 0, "arrive": 0, "cargo": {}, "route": null,
 		"flagship": hid == pid() and _ships_of(hid).is_empty(),
-		"mods": {"hull": 0, "sail": 0, "hold": 0, "guns": 0}, "fleet": 0, "slot": "main",
+		"mods": {"hull": 0, "sail": 0, "hold": 0, "guns": 0}, "fleet": 0, "slot": "main", "dmg": 0,
 	}
 	s["ships"].append(sh)
 	return sh
@@ -746,11 +748,16 @@ func sell_ship(ship_id: int) -> Dictionary:
 		return _fail("至少保留一艘飞艇。")
 	if not sh["cargo"].is_empty():
 		return _fail("请先清空货舱。")
-	var v := int(GameData.SHIPS[sh["type"]]["price"] * 0.6)
+	var v := int(GameData.SHIPS[sh["type"]]["price"] * 0.6 * (1.0 - 0.5 * float(sh.get("dmg", 0)) / 100.0))
 	house()["gold"] += v
+	_remove_ship(sh)
+	return {"ok": true, "msg": "出售 %s，回收 %d 金。" % [sh["name"], v]}
+
+
+func _remove_ship(sh: Dictionary) -> void:
 	var was_flag: bool = sh["flagship"]
 	s["ships"].erase(sh)
-	if was_flag:
+	if was_flag and not _ships_of(pid()).is_empty():
 		var nf: Dictionary = _ships_of(pid())[0]
 		nf["flagship"] = true
 		nf["fleet"] = 0
@@ -758,7 +765,27 @@ func sell_ship(ship_id: int) -> Dictionary:
 		for o in _ships_of(pid()):
 			if int(o.get("fleet", 0)) == int(sh["id"]):
 				o["fleet"] = int(nf["id"])
-	return {"ok": true, "msg": "出售 %s，回收 %d 金。" % [sh["name"], v]}
+
+
+func repair_cost(sh: Dictionary) -> int:
+	return int(roundf(float(GameData.SHIPS[sh["type"]]["price"]) * float(sh.get("dmg", 0)) / 100.0 * GameData.REPAIR_RATE))
+
+
+## Pay the yard to mend battle damage at once (a docked ship also mends a little every day).
+func repair_ship(ship_id: int) -> Dictionary:
+	var sh := ship(ship_id)
+	if sh.is_empty() or not docked(sh):
+		return _fail("飞艇不在港口。")
+	if int(sh.get("dmg", 0)) <= 0:
+		return _fail("%s 完好无损。" % sh["name"])
+	var cost := repair_cost(sh)
+	var h := house(sh["owner"])
+	if h["gold"] < cost:
+		return _fail("修理费 %d 金，金币不足。" % cost)
+	h["gold"] -= cost
+	h["month_out"] += cost
+	sh["dmg"] = 0
+	return {"ok": true, "msg": "%s 修理完毕，花费 %d 金。" % [sh["name"], cost]}
 
 
 ## Auto route: a loop of 2–4 stops; at each stop the ship sells what it carries (except goods
@@ -964,9 +991,15 @@ func _tick_contracts() -> void:
 	for c in s["contracts"].duplicate():
 		if day > int(c["end"]):
 			s["contracts"].erase(c)
-			_say("%s 的 %s 委托过期了。" % [GameData.port_name(c["port"]), GameData.good_name(c["good"])], "month")
+			if c.get("kind", "trade") == "bounty":
+				_say("%s 附近的云盗转移了，悬赏作废。" % GameData.port_name(c["port"]), "month")
+			else:
+				_say("%s 的 %s 委托过期了。" % [GameData.port_name(c["port"]), GameData.good_name(c["good"])], "month")
 	if day >= 20 and day % 20 == 0 and s["contracts"].size() < GameData.MAX_CONTRACTS and rng.randf() < 0.5:
-		_post_contract()
+		if day > 120 and rng.randf() < 0.3 and open_bounties().is_empty():
+			_post_bounty()
+		else:
+			_post_contract()
 
 
 func contract(cid: int) -> Dictionary:
@@ -977,6 +1010,8 @@ func contract(cid: int) -> Dictionary:
 
 
 func can_fulfill(sh: Dictionary, c: Dictionary) -> bool:
+	if c.get("kind", "trade") != "trade":
+		return false
 	return docked(sh) and sh["port"] == c["port"] and int(fleet_cargo(sh).get(c["good"], {}).get("qty", 0)) >= int(c["qty"])
 
 
@@ -1208,10 +1243,290 @@ func _say(text: String, kind: String = "info") -> void:
 	message.emit(text, kind)
 
 
+# ---------------------------------------------------------------- encounters & battle
+
+var battle: Battle = null
+
+
+## Battle unit for one of the player's ships.
+func unit_of(sh: Dictionary) -> Dictionary:
+	return Battle.unit(sh["type"], sh["name"], sh["mods"], sh.get("slot", "main"), sh["flagship"], int(sh.get("dmg", 0)), int(sh["id"]))
+
+
+func fleet_power(sh: Dictionary) -> int:
+	var p := 0
+	for o in fleet_ships(sh):
+		p += Battle.power(unit_of(o))
+	return p
+
+
+## Compose a pirate fleet of roughly the given power (at least one sloop).
+func _pirate_fleet(target: int) -> Array:
+	var out := []
+	var flag := "p_sloop"
+	if target >= 600:
+		flag = "p_lord"
+	elif target >= 300:
+		flag = "p_raider"
+	out.append(flag)
+	var total := Battle.power(Battle.unit(flag, "", {}, "main", true))
+	while total < int(float(target) * 0.8) and out.size() < 4:
+		var t := "p_raider" if target - total >= 240 and rng.randf() < 0.5 else "p_sloop"
+		out.append(t)
+		total += Battle.power(Battle.unit(t, "", {}, "van", false))
+	return out
+
+
+func _fleet_power_of(types: Array) -> int:
+	var p := 0
+	for i in types.size():
+		p += Battle.power(Battle.unit(types[i], "", {}, "main" if i == 0 else "van", i == 0))
+	return p
+
+
+func open_bounties() -> Array:
+	return s["contracts"].filter(func(c): return c.get("kind", "trade") == "bounty")
+
+
+func _post_bounty() -> void:
+	var fl := flagship()
+	if fl.is_empty():
+		return
+	var port: String = GameData.PORT_IDS[rng.randi() % GameData.PORT_IDS.size()]
+	var power := int(float(fleet_power(fl)) * rng.randf_range(0.8, 1.2))
+	var reward := int(roundf(float(power) * rng.randf_range(14.0, 20.0) / 100.0) * 100.0)
+	var c := {"id": s["next_contract_id"], "kind": "bounty", "port": port, "good": "", "qty": 0, "reward": reward,
+		"end": int(s["day"]) + rng.randi_range(90, 150), "chasers": [], "power": power, "taker": ""}
+	s["next_contract_id"] = int(s["next_contract_id"]) + 1
+	s["contracts"].append(c)
+	_say("悬赏：云盗在 %s 外海劫船，城主悬赏 %d 金，%d 天内有效。到酒馆接下悬赏，驶抵该港即可迎战。" % [GameData.port_name(port), reward, int(c["end"]) - int(s["day"])], "contract")
+
+
+func take_bounty(cid: int) -> Dictionary:
+	var c := contract(cid)
+	if c.is_empty() or c.get("kind", "trade") != "bounty":
+		return _fail("这张悬赏已经撤下了。")
+	for o in open_bounties():
+		if o.get("taker", "") == pid() and int(o["id"]) != cid:
+			return _fail("先了结手上那张悬赏。")
+	if c.get("taker", "") == pid():
+		c["taker"] = ""
+		return {"ok": true, "msg": "放弃了 %s 的悬赏。" % GameData.port_name(c["port"])}
+	c["taker"] = pid()
+	return {"ok": true, "msg": "接下悬赏：驶抵 %s 即与云盗交战。" % GameData.port_name(c["port"])}
+
+
+## Pirates (or a bounty target) cross the flagship's path; the game stops until the player chooses.
+func start_encounter(kind: String, cid: int = -1) -> void:
+	var fl := flagship()
+	if fl.is_empty() or s["encounter"] != null:
+		return
+	var year := int(s["day"]) / GameData.DAYS_YEAR
+	var diff_mult: float = [0.85, 1.0, 1.15][clampi(int(s["difficulty"]), 0, 2)]
+	var target: int
+	if kind == "bounty":
+		var c := contract(cid)
+		target = int(float(c.get("power", fleet_power(fl))) * 1.25 * diff_mult)
+	else:
+		target = int(float(fleet_power(fl)) * rng.randf_range(0.45, 0.85) * (1.0 + 0.05 * float(year)) * diff_mult)
+	var enemies := _pirate_fleet(maxi(100, target))
+	target = _fleet_power_of(enemies)
+	var where: String = (GameData.port_name(fl["port"]) + " 外海") if docked(fl) else ("前往 %s 的航路上" % GameData.port_name(fl["to"]))
+	s["encounter"] = {"kind": kind, "cid": cid, "enemies": enemies, "power": target, "where": where}
+	_say("%s，%d 艘云盗船拦住了 %s 的去路！" % [where, enemies.size(), fl["name"]], "bad")
+
+
+func encounter_text() -> String:
+	var e = s["encounter"]
+	if e == null:
+		return ""
+	var names := []
+	for t in e["enemies"]:
+		names.append(GameData.SHIPS[t]["name"])
+	return "%s，%s 挂着云盗旗冲了过来。你的船队战力约 %d，对方约 %d。" % [e["where"], "、".join(names), fleet_power(flagship()), int(e["power"])]
+
+
+func toll() -> int:
+	return int(maxf(float(GameData.TOLL_MIN), maxf(0.0, float(house()["gold"])) * GameData.TOLL_RATE))
+
+
+func encounter_pay() -> Dictionary:
+	if s["encounter"] == null:
+		return _fail("没有遭遇。")
+	if s["encounter"]["kind"] == "bounty":
+		return _fail("悬赏目标不收买路钱。")
+	var t := toll()
+	house()["gold"] -= t
+	house()["month_out"] += t
+	s["encounter"] = null
+	_say("交了 %d 金过路费，云盗大笑着钻回云里。" % t, "info")
+	return {"ok": true, "msg": "交了 %d 金过路费。" % t}
+
+
+## Chance that the fleet outruns the pirates (seamanship and sails help).
+func flee_chance() -> float:
+	var fl := flagship()
+	var slowest := 9.0
+	for o in fleet_ships(fl):
+		slowest = minf(slowest, float(GameData.SHIPS[o["type"]]["speed"]) * speed_mult(o))
+	return clampf(0.3 + 0.07 * float(hero_abil("sail") - 1) + (slowest - 1.0) * 0.6, 0.1, 0.9)
+
+
+func encounter_flee() -> Dictionary:
+	if s["encounter"] == null:
+		return _fail("没有遭遇。")
+	if s["encounter"]["kind"] == "bounty":
+		return _fail("你是来剿匪的。")
+	if rng.randf() < flee_chance():
+		var fl := flagship()
+		for o in fleet_ships(fl):
+			if not docked(o):
+				o["arrive"] = int(o["arrive"]) + 1
+		s["encounter"] = null
+		_say("船队钻进云层甩开了云盗，多绕了一天。", "good")
+		return {"ok": true, "msg": "甩开了云盗，航程多了一天。", "escaped": true}
+	_say("云盗咬得太紧，甩不掉，只能迎战！", "bad")
+	var r := encounter_fight()
+	r["escaped"] = false
+	for u in battle.alive(0):
+		u["morale"] = maxi(0, int(u["morale"]) - 10)
+	return r
+
+
+func encounter_fight() -> Dictionary:
+	if s["encounter"] == null:
+		return _fail("没有遭遇。")
+	var fl := flagship()
+	var mine := []
+	for o in fleet_ships(fl):
+		mine.append(unit_of(o))
+	var foes := []
+	var i := 0
+	for t in s["encounter"]["enemies"]:
+		foes.append(Battle.unit(t, ["黑帆号", "夜枭号", "断桅号", "蚀月号"][i % 4], {}, "main" if i == 0 else "van", i == 0))
+		i += 1
+	battle = Battle.new()
+	battle.setup(mine, foes, {"fight": hero_abil("fight"), "lvl": int(s["hero"]["lvl"])}, int(s["seed"]) + int(s["day"]) * 7, int(s["difficulty"]))
+	s["battle"] = battle.b
+	return {"ok": true, "msg": "接战！"}
+
+
+## Apply the finished battle to the world: damage, lost and captured ships, loot, reputation.
+func end_battle() -> Dictionary:
+	if battle == null or battle.b["over"] == "":
+		return _fail("战斗还没结束。")
+	var res: String = battle.b["over"]
+	var fl := flagship()
+	var h := house()
+	var out := {"res": res, "gold": 0, "goods": [], "lost": [], "won": [], "rep": 0, "exp": 0, "bounty": 0}
+	for u in battle.b["units"]:
+		if int(u["home"]) == 0:
+			var sh := ship(int(u["ship_id"]))
+			if sh.is_empty():
+				continue
+			var gone: bool = u["status"] == "sunk" or (u["status"] == "ok" and int(u["side"]) == 1 and res != "win")
+			if gone and not sh["flagship"]:
+				out["lost"].append(sh["name"])
+				_remove_ship(sh)
+			elif gone:
+				sh["dmg"] = 85
+				sh["cargo"] = {}
+			else:
+				sh["dmg"] = clampi(int(roundf(100.0 * (1.0 - float(u["hp"]) / float(u["hp_max"])))), 0, 95)
+		elif res == "win":
+			if u["status"] == "ok" and int(u["side"]) == 0:
+				var price := int(GameData.SHIPS[u["type"]]["price"])
+				if _ships_of(pid()).size() < max_ships():
+					var ns := _add_ship(pid(), u["type"], fl["port"])
+					ns["dmg"] = clampi(int(roundf(100.0 * (1.0 - float(u["hp"]) / float(u["hp_max"])))), 0, 95)
+					for k in ["from", "to", "depart", "arrive"]:
+						ns[k] = fl[k]
+					ns["fleet"] = int(fl["id"])
+					ns["slot"] = "rear"
+					out["won"].append("%s（%s）" % [ns["name"], GameData.SHIPS[u["type"]]["name"]])
+				else:
+					out["gold"] = int(out["gold"]) + int(price * 0.4)
+					out["won"].append("%s（船队已满，折价 %d 金）" % [GameData.SHIPS[u["type"]]["name"], int(price * 0.4)])
+				out["gold"] = int(out["gold"]) + int(price * 0.06)
+			elif u["status"] == "sunk":
+				out["gold"] = int(out["gold"]) + int(int(u["value"]) * 0.06)
+			elif u["status"] == "fled":
+				out["gold"] = int(out["gold"]) + int(int(u["value"]) * 0.02)
+			else:
+				out["gold"] = int(out["gold"]) + int(int(u["value"]) * 0.12)
+	var n: int = s["encounter"]["enemies"].size() if s["encounter"] != null else 1
+	if res == "win":
+		var free := fleet_cargo_cap(fl) - fleet_cargo_used(fl)
+		var pool := GameData.GOOD_IDS.filter(func(g): return GameData.tier(g) <= 2 and GameData.GOODS[g]["home"] != "")
+		var g: String = pool[rng.randi() % pool.size()]
+		var qty := mini(free, 15 + 10 * n + rng.randi_range(0, 10))
+		if qty > 0:
+			_stow(fl, g, qty, 0.0)
+			out["goods"].append([g, qty])
+		out["rep"] = 60
+		out["exp"] = 60 + 25 * n
+		if s["encounter"] != null and s["encounter"]["kind"] == "bounty":
+			var c := contract(int(s["encounter"]["cid"]))
+			if not c.is_empty():
+				out["bounty"] = int(c["reward"])
+				out["rep"] = int(out["rep"]) + GameData.BOUNTY_REP
+				add_friend(c["port"], pid(), 120)
+				s["contracts"].erase(c)
+		h["gold"] += float(out["gold"]) + float(out["bounty"])
+		h["month_in"] += float(out["gold"]) + float(out["bounty"])
+		add_rep(pid(), int(out["rep"]))
+		add_exp(int(out["exp"]))
+		s["stats"]["wins"] = int(s["stats"].get("wins", 0)) + 1
+	elif res == "loss":
+		var t := int(maxf(300.0, maxf(0.0, float(h["gold"])) * 0.10))
+		h["gold"] -= t
+		h["month_out"] += t
+		out["gold"] = -t
+		for o in fleet_ships(fl):
+			o["cargo"] = {}
+		out["exp"] = 20
+		add_exp(20)
+	else:
+		out["exp"] = 15
+		add_exp(15)
+	s["stats"]["battles"] = int(s["stats"].get("battles", 0)) + 1
+	var text: String = {"win": "击退云盗", "loss": "败给了云盗", "withdraw": "撤出了战斗"}[res]
+	if int(out["gold"]) != 0 or int(out["bounty"]) != 0:
+		text += "，金币 %+d" % (int(out["gold"]) + int(out["bounty"]))
+	if not out["lost"].is_empty():
+		text += "，失去 " + "、".join(out["lost"])
+	if not out["won"].is_empty():
+		text += "，俘获 " + "、".join(out["won"])
+	_say(text + "。", "good" if res == "win" else "bad")
+	out["text"] = text
+	s["battle"] = null
+	s["encounter"] = null
+	s["battle_result"] = out
+	battle = null
+	return out
+
+
+## Bots and tests: fight when the odds look fair, otherwise pay.
+func auto_encounter() -> Dictionary:
+	if s["encounter"] == null:
+		return _fail("没有遭遇。")
+	var fl := flagship()
+	if s["encounter"]["kind"] != "bounty" and fleet_power(fl) < int(float(s["encounter"]["power"]) * 1.25):
+		if house()["gold"] >= toll():
+			return encounter_pay()
+		var r := encounter_flee()
+		if r.get("escaped", false):
+			return r
+	else:
+		encounter_fight()
+	battle.auto_play()
+	return end_battle()
+
+
 # ---------------------------------------------------------------- time
 
 func blocked() -> bool:
-	return s["over"] != null or s["event"] != null
+	return s["over"] != null or s["event"] != null or s.get("encounter") != null
 
 
 func advance_day() -> void:
@@ -1264,6 +1579,8 @@ func _tick_ships() -> void:
 			sh["to"] = ""
 			_on_arrive(sh)
 		elif docked(sh):
+			if int(sh.get("dmg", 0)) > 0:
+				sh["dmg"] = maxi(0, int(sh["dmg"]) - GameData.DOCK_REPAIR)
 			if sh["owner"] == pid() and sh["route"] != null:
 				_run_route(sh)
 			elif sh["owner"] != pid():
@@ -1284,6 +1601,10 @@ func _on_arrive(sh: Dictionary) -> void:
 		elif sh["flagship"]:
 			_say("%s 抵达 %s。" % [sh["name"], GameData.port_name(sh["port"])])
 			s["arrived"] = sh["id"]
+			for c in s["contracts"]:
+				if c.get("kind", "trade") == "bounty" and c.get("taker", "") == pid() and c["port"] == sh["port"]:
+					start_encounter("bounty", int(c["id"]))
+					break
 	else:
 		AiPlayer.ship_turn(self, sh)
 
@@ -1478,6 +1799,7 @@ func from_json(text: String) -> bool:
 		for k in sh["mods"]:
 			sh["mods"][k] = int(sh["mods"][k])
 		sh["fleet"] = int(sh.get("fleet", 0))
+		sh["dmg"] = int(sh.get("dmg", 0))
 		if not sh.has("slot"):
 			sh["slot"] = "main"
 		if sh["route"] != null:
@@ -1489,6 +1811,28 @@ func from_json(text: String) -> bool:
 	for c in s["contracts"]:
 		for k in ["id", "qty", "reward", "end"]:
 			c[k] = int(c[k])
+		if c.has("power"):
+			c["power"] = int(c["power"])
+	for k in ["encounter", "battle", "battle_result"]:
+		if not s.has(k):
+			s[k] = null
+	if s["encounter"] != null:
+		for k in ["cid", "power"]:
+			s["encounter"][k] = int(s["encounter"][k])
+	if s["battle"] != null:
+		var bb: Dictionary = s["battle"]
+		for k in ["round", "cur", "cp", "cp_max", "fight", "hero_lvl", "focus", "bonus_move", "difficulty"]:
+			bb[k] = int(bb[k])
+		bb["order"] = bb["order"].map(func(x): return int(x))
+		bb["events"] = []
+		for k in bb["smoke"]:
+			bb["smoke"][k] = int(bb["smoke"][k])
+		for u in bb["units"]:
+			for k in ["id", "side", "home", "hp", "hp_max", "crew", "crew_max", "guns", "move", "col", "row", "morale", "moved", "value", "ship_id", "sprite"]:
+				u[k] = int(u[k])
+		battle = Battle.new()
+		battle.b = bb
+		battle.rng.seed = int(s["seed"]) + int(s["day"]) * 7
 	for pid in s["ports"]:
 		var p: Dictionary = s["ports"][pid]
 		for hid in p["friend"]:

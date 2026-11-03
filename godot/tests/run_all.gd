@@ -7,6 +7,12 @@ var failures := 0
 
 
 func _init() -> void:
+	if OS.get_environment("YUNHAI_QUICK") != "":
+		test_battle()
+		test_encounters()
+		print("FAILURES: %d" % failures)
+		quit(1 if failures > 0 else 0)
+		return
 	test_price_feedback()
 	test_save_load()
 	test_idle_player_goes_bankrupt()
@@ -15,6 +21,8 @@ func _init() -> void:
 	test_hero()
 	test_fleet_and_refit()
 	test_multi_stop_route()
+	test_battle()
+	test_encounters()
 	var seeds := [11, 22, 33, 44, 55]
 	var crowns := 0
 	var bot_stage := 0
@@ -47,6 +55,8 @@ func run_until_over(sim: Sim, bot: bool, log_every: int = 0) -> void:
 	while sim.s["over"] == null and sim.s["crown"] == null and guard < GameData.DAYS_YEAR * 12:
 		if sim.s["event"] != null:
 			EventBook.resolve(sim, 0)
+		if sim.s["encounter"] != null:
+			sim.auto_encounter()
 		if bot:
 			for sh in sim.ships_of(sim.pid()):
 				if sim.docked(sh):
@@ -279,6 +289,159 @@ func test_idle_player_goes_bankrupt() -> void:
 	check(sim.house()["gold"] > -50000, "gold never runs away to huge negatives (%d)" % int(sim.house()["gold"]))
 
 
+func test_battle() -> void:
+	print("battle")
+	# hex maths
+	check(Battle.dist(0, 0, 3, 0) == 3 and Battle.dist(0, 0, 0, 2) == 2 and Battle.dist(1, 1, 1, 2) == 1, "hex distance (odd-r)")
+	check(Battle.neighbors(0, 0).size() == 2 and Battle.neighbors(5, 3).size() == 6, "hex neighbours clipped to the board")
+	# a gunboat with the hero at fight 10 beats a lone sloop; a lone survey boat loses or runs
+	var wins := 0
+	var ends := {}
+	for sd in 12:
+		var bt := Battle.new()
+		bt.setup([Battle.unit("gunboat", "炮舰", {"hull": 1, "guns": 1}, "main", true, 0, 1), Battle.unit("freighter", "货艇", {}, "rear", false, 0, 2)],
+			[Battle.unit("p_sloop", "黑帆号", {}, "main", true), Battle.unit("p_sloop", "夜枭号", {}, "van", false)], {"fight": 6, "lvl": 5}, 100 + sd)
+		var r := bt.auto_play()
+		ends[r] = int(ends.get(r, 0)) + 1
+		if r == "win":
+			wins += 1
+		check(bt.b["round"] <= Battle.ROUND_CAP + 1, "battle ends within the round cap")
+	print("    gunboat+freighter vs 2 sloops: ", ends)
+	check(wins >= 8, "a refitted gunboat with a seasoned captain wins most fights (%d/12)" % wins)
+	var losses := 0
+	for sd in 12:
+		var bt2 := Battle.new()
+		bt2.setup([Battle.unit("survey", "测绘艇", {}, "main", true, 0, 1)], [Battle.unit("p_raider", "黑帆号", {}, "main", true), Battle.unit("p_sloop", "夜枭号", {}, "van", false)], {"fight": 1, "lvl": 1}, 300 + sd)
+		if bt2.auto_play() != "win":
+			losses += 1
+	check(losses >= 10, "an unarmed survey boat does not beat raiders (%d/12 non-wins)" % losses)
+	# manual actions: move, fire, tactics, retreat
+	var bt3 := Battle.new()
+	bt3.setup([Battle.unit("gunboat", "炮舰", {}, "main", true, 0, 1)], [Battle.unit("p_sloop", "黑帆号", {}, "main", true)], {"fight": 3, "lvl": 8}, 7)
+	var u := _player_turn(bt3)
+	check(not u.is_empty() and int(u["side"]) == 0, "a player ship gets its turn")
+	var reach := bt3.reachable(u)
+	check(not reach.is_empty() and reach.values().max() <= int(u["move"]), "reachable hexes respect movement")
+	var far := ""
+	for k in reach:
+		if far == "" or int(reach[k]) > int(reach[far]):
+			far = k
+	var parts: PackedStringArray = far.split(",")
+	check(bt3.move_to(int(u["id"]), int(parts[0]), int(parts[1]))["ok"], "move to a reachable hex")
+	check(not bt3.fire(int(u["id"]), 1)["ok"], "cannot fire across the whole board")
+	check(bt3.tactic("rally", -1)["ok"] and bt3.b["cp"] == 0, "rally spends the command point")
+	check(not bt3.tactic("lure", 1)["ok"], "lure needs hero level 10")
+	check(bt3.defend(int(u["id"]))["ok"] and u["defend"], "defend sets the guard")
+	var e := bt3.next_unit()
+	check(not e.is_empty() and int(e["side"]) == 1, "then the enemy acts")
+	bt3.ai_turn()
+	check(e["acted"], "the pirate captain spends its action")
+	# a brand new battle: the flagship starts at the edge and may retreat at once
+	var bt4 := Battle.new()
+	bt4.setup([Battle.unit("freighter", "货艇", {}, "main", true, 0, 1)], [Battle.unit("p_sloop", "黑帆号", {}, "main", true)], {"fight": 1, "lvl": 1}, 9)
+	var u4 := _player_turn(bt4)
+	check(bt4.can_retreat(u4) and bt4.retreat(int(u4["id"]))["ok"] and bt4.b["over"] == "withdraw", "retreating the only ship ends the fight as a withdrawal")
+	# save round trip keeps the battle playable
+	var sim := Sim.new()
+	sim.new_game(5)
+	sim.house()["gold"] = 50000.0
+	var fl := sim.flagship()
+	sim.start_encounter("pirates")
+	check(sim.s["encounter"] != null and sim.blocked(), "an encounter stops the clock")
+	sim.encounter_fight()
+	var json := sim.to_json()
+	var sim2 := Sim.new()
+	check(sim2.from_json(json) and sim2.battle != null and sim2.battle.b["units"].size() == sim.battle.b["units"].size(), "a battle survives save/load")
+	sim2.battle.auto_play()
+	var out := sim2.end_battle()
+	check(out.has("res") and sim2.s["battle"] == null and sim2.s["encounter"] == null and not sim2.blocked(), "ending the battle clears the encounter")
+
+
+## Advance the battle (playing enemy turns) until a player ship is up.
+func _player_turn(bt: Battle) -> Dictionary:
+	var u := bt.next_unit()
+	var guard := 0
+	while not u.is_empty() and int(u["side"]) == 1 and guard < 20:
+		bt.ai_turn()
+		u = bt.next_unit()
+		guard += 1
+	return u
+
+
+func test_encounters() -> void:
+	print("encounters")
+	var sim := Sim.new()
+	sim.new_game(21)
+	var fl := sim.flagship()
+	sim.house()["gold"] = 40000.0
+	# wind: the same leg takes a different time in opposite seasons
+	var d_spring := sim.travel_days("muxia", "cuijing", "freighter")
+	sim.s["day"] = 180
+	var d_autumn := sim.travel_days("muxia", "cuijing", "freighter")
+	check(d_spring != d_autumn, "seasonal wind changes travel time (%d vs %d days)" % [d_spring, d_autumn])
+	sim.s["day"] = 0
+	# toll
+	sim.start_encounter("pirates")
+	var g0: float = sim.house()["gold"]
+	check(sim.encounter_pay()["ok"] and sim.house()["gold"] < g0 and sim.s["encounter"] == null, "paying the toll clears the encounter")
+	# loss costs cargo and gold but never the flagship
+	sim.start_encounter("pirates")
+	fl["cargo"] = {"silk": {"qty": 20, "cost": 100.0}}
+	sim.encounter_fight()
+	for u in sim.battle.b["units"]:
+		if int(u["home"]) == 0:
+			u["hp"] = 0
+			u["status"] = "sunk"
+	sim.battle.b["over"] = "loss"
+	var g1: float = sim.house()["gold"]
+	var out := sim.end_battle()
+	check(out["res"] == "loss" and sim.house()["gold"] < g1 and fl["cargo"].is_empty() and not sim.flagship().is_empty() and int(fl["dmg"]) > 0, "a lost battle costs gold and cargo, the flagship limps on")
+	# repair
+	fl["port"] = "muxia"
+	var rc := sim.repair_cost(fl)
+	check(rc > 0 and sim.repair_ship(fl["id"])["ok"] and int(fl["dmg"]) == 0, "the yard mends battle damage for gold (%d)" % rc)
+	# win: loot, reputation, captured ship joins the fleet
+	sim.start_encounter("pirates")
+	sim.encounter_fight()
+	var rep0: int = sim.house()["rep"]
+	var n0 := sim.ships_of().size()
+	for u in sim.battle.b["units"]:
+		if int(u["home"]) == 1:
+			u["side"] = 0
+			u["taken"] = true
+	sim.battle.b["over"] = "win"
+	var out2 := sim.end_battle()
+	check(out2["res"] == "win" and int(sim.house()["rep"]) > rep0 and sim.ships_of().size() == n0 + 1 and int(out2["gold"]) > 0, "a won battle brings loot, reputation and a captured ship")
+	# bounty: posted, taken, fought on arrival
+	sim._post_bounty()
+	var bs := sim.open_bounties()
+	check(bs.size() == 1 and bs[0]["reward"] > 0, "a bounty is posted at the tavern")
+	var c: Dictionary = bs[0]
+	check(sim.take_bounty(int(c["id"]))["ok"] and c["taker"] == sim.pid(), "the player takes the bounty")
+	for sh in sim.ships_of():
+		sh["port"] = c["port"]
+		sh["to"] = ""
+	fl["port"] = "qianqi" if c["port"] != "qianqi" else "muxia"
+	fl["from"] = fl["port"]
+	fl["to"] = c["port"]
+	fl["depart"] = sim.s["day"]
+	fl["arrive"] = sim.s["day"]
+	fl["port"] = ""
+	sim._tick_ships()
+	check(sim.s["encounter"] != null and sim.s["encounter"]["kind"] == "bounty", "arriving at the bounty port starts the fight")
+	check(not sim.encounter_pay()["ok"], "bounty targets take no toll")
+	sim.encounter_fight()
+	for u in sim.battle.b["units"]:
+		if int(u["home"]) == 1:
+			u["status"] = "sunk"
+	sim.battle.b["over"] = "win"
+	var g2: float = sim.house()["gold"]
+	var out3 := sim.end_battle()
+	check(int(out3["bounty"]) == int(c["reward"]) and sim.open_bounties().is_empty() and sim.house()["gold"] > g2, "the bounty pays out and is removed")
+	# the contract board ignores bounties for deliveries
+	check(not sim.can_fulfill(fl, {"kind": "bounty", "port": fl["port"], "good": "", "qty": 0}), "bounties are never delivered as goods")
+
+
 func test_bot_player(sd: int) -> Dictionary:
 	print("bot player seed %d" % sd)
 	var sim := Sim.new()
@@ -288,6 +451,8 @@ func test_bot_player(sd: int) -> Dictionary:
 	while sim.s["over"] == null and sim.s["crown"] == null and guard < GameData.DAYS_YEAR * 12:
 		if sim.s["event"] != null:
 			EventBook.resolve(sim, 0)
+		if sim.s["encounter"] != null:
+			sim.auto_encounter()
 		for sh in sim.ships_of(sim.pid()):
 			if sim.docked(sh):
 				AiPlayer.ship_turn(sim, sh)

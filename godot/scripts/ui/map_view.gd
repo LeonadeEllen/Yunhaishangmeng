@@ -107,10 +107,12 @@ func _draw() -> void:
 			var a := to_screen(GameData.PORTS[sh["from"]]["pos"])
 			var b := to_screen(GameData.PORTS[sh["to"]]["pos"])
 			_dashed(a, b, Color(UiKit.BRASS, 0.85) if sh["id"] == fl.get("id", -1) else Color(UiKit.JADE, 0.55), 3.0 * sc + 1.0)
-		elif sh["route"] != null:
-			var a2 := to_screen(GameData.PORTS[sh["route"]["a"]]["pos"])
-			var b2 := to_screen(GameData.PORTS[sh["route"]["b"]]["pos"])
-			_dashed(a2, b2, Color(UiKit.JADE, 0.35), 2.0)
+		elif sh["route"] != null and sh["route"].has("stops"):
+			var stops: Array = sh["route"]["stops"]
+			for i in stops.size():
+				var a2 := to_screen(GameData.PORTS[stops[i]["port"]]["pos"])
+				var b2 := to_screen(GameData.PORTS[stops[(i + 1) % stops.size()]["port"]]["pos"])
+				_dashed(a2, b2, Color(UiKit.JADE, 0.35), 2.0)
 	# hover route preview from flagship
 	if not fl.is_empty() and sim.docked(fl) and hover_port != "" and hover_port != fl["port"]:
 		_dashed(to_screen(GameData.PORTS[fl["port"]]["pos"]), to_screen(GameData.PORTS[hover_port]["pos"]), Color(UiKit.BRASS, 0.9), 3.0)
@@ -151,6 +153,19 @@ func _draw() -> void:
 			if sh.get("flagship", false):
 				draw_circle(r2.get_center(), w2 * 0.62, Color(UiKit.BRASS, 0.22))
 			draw_texture_rect(tex2, r2, false)
+	# seasonal wind rose (bottom right of the map)
+	var day: int = sim.s["day"]
+	var wv: Vector2 = GameData.WIND[(day % GameData.DAYS_YEAR) / 90]
+	var wc := Vector2(size.x - 70, size.y - 150)
+	draw_circle(wc, 30.0, Color(1, 1, 1, 0.55))
+	draw_arc(wc, 30.0, 0.0, TAU, 40, Color(UiKit.BRASS, 0.8), 1.5, true)
+	var sway := sin(_t * 1.7) * 0.08
+	var dir := wv.rotated(sway)
+	var tip := wc + dir * 24.0
+	draw_line(wc - dir * 20.0, tip, UiKit.INK, 3.0, true)
+	draw_line(tip, tip - dir.rotated(0.5) * 9.0, UiKit.INK, 3.0, true)
+	draw_line(tip, tip - dir.rotated(-0.5) * 9.0, UiKit.INK, 3.0, true)
+	draw_string(font, wc + Vector2(-32, 50), "%s · %s" % [GameData.SEASONS[(day % GameData.DAYS_YEAR) / 90], GameData.wind_name(day)], HORIZONTAL_ALIGNMENT_CENTER, 64, 13, UiKit.INK)
 	# port name plates on top of ships
 	for pid in GameData.PORT_IDS:
 		var p := to_screen(GameData.PORTS[pid]["pos"])

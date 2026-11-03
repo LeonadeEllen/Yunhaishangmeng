@@ -13,6 +13,8 @@ static func ship_turn(sim: Sim, sh: Dictionary) -> void:
 		return
 	var port: String = sh["port"]
 	var home: String = GameData.HOUSES[hid]["home"]
+	if sim.in_fleet(sh):
+		sim.leave_fleet(int(sh["id"]))   # a captured prize trades on its own under the bot
 	for c in sim.open_contracts(port):
 		if sim.can_fulfill(sh, c):
 			sim.fulfill(sh["id"], c["id"])
@@ -210,7 +212,7 @@ static func monthly(sim: Sim, hid: String) -> void:
 						break
 				break
 	# Keep enough for the next lighthouse stage before expanding.
-	if ships.size() < sim.max_ships(hid) and h["gold"] > 26000 + 15000:
+	if ships.size() < sim.max_ships(hid) and h["gold"] > sim.ship_price("galleon", hid) + WORKING_CAPITAL * 2.0:
 		var home: String = GameData.HOUSES[hid]["home"]
 		h["gold"] -= sim.ship_price("galleon", hid)
 		sim._add_ship(hid, "galleon", home)

@@ -5,6 +5,7 @@ const SAVE_PATH := "user://save.json"
 const SPEEDS := [0, 1, 3, 8]          # days per second
 const MapView := preload("res://scripts/ui/map_view.gd")
 const TownView := preload("res://scripts/ui/town_view.gd")
+const BattleView := preload("res://scripts/ui/battle_view.gd")
 
 var sim: Sim
 var speed_idx := 1
@@ -28,6 +29,7 @@ var _town_kind := ""        # building the protagonist is standing in ("" = stre
 # nodes
 var map: Control
 var town: Control
+var battle_view: Control
 var hero_btn: Button
 var hud: Control
 var top_gold: Label
@@ -207,6 +209,7 @@ func _show_help() -> void:
 		"· 产业：在城主府买地契、在工匠行会买图纸，然后在商馆页的地块上建工坊。原料 → 加工品 → 精品，越高阶利润越厚。",
 		"· 城镇：旗舰进港后会走进城里。WASD 走动，点建筑进门办事，Esc 回到海图。路人会透露行情。",
 		"· 主角：卖货、航行、委托和建坊都涨经验，升级得能力点，点顶栏的名字分配到航海 / 交易 / 魅力。",
+		"· 航行与空战：季风随季节转向，顺风航程更短。载货航行可能遇上云盗：应战、交过路费或甩开。空战是回合制六角格：炮击、接舷、修补、防御、撤退，主角升级学会指挥战术。酒馆有剿匪悬赏。",
 		"· 时间：空格暂停，1/2/3 切换速度。旗舰抵港时自动暂停。",
 		"· 灯塔：三层灯塔是云海盟主的象征，不建也可以一直玩下去。金币为负超过 30 天会破产。",
 	], [["明白了", func(): _close_modal()]])
@@ -234,6 +237,10 @@ func _start(load_save: bool, house_id: String = "lamp", difficulty: int = 1) -> 
 	_open_port(sim.flagship()["port"] if _flag_docked else GameData.HOUSES[sim.pid()]["home"])
 	speed_idx = 0 if not load_save else 1
 	_refresh_speed()
+	if sim.s["battle"] != null and sim.battle != null:
+		_open_battle()
+	elif sim.s["encounter"] != null:
+		_show_encounter()
 	if not load_save:
 		var me: Dictionary = GameData.HOUSES[sim.pid()]
 		var rivals := []
@@ -322,6 +329,11 @@ func _build_game() -> void:
 	hover_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hover_card.visible = false
 	add_child(hover_card)
+	battle_view = BattleView.new()
+	battle_view.set_anchors_preset(Control.PRESET_FULL_RECT)
+	battle_view.visible = false
+	battle_view.finished.connect(_on_battle_finished)
+	add_child(battle_view)
 	modal_layer = Control.new()
 	modal_layer.set_anchors_preset(Control.PRESET_FULL_RECT)
 	modal_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -417,6 +429,11 @@ func _after_day() -> bool:
 	if int(sim.house()["lh"]["stage"]) > _lh_seen:
 		_lh_seen = sim.house()["lh"]["stage"]
 		_lighthouse_cutscene(_lh_seen)
+		stop = true
+	elif sim.s["encounter"] != null:
+		sfx("bad")
+		_set_speed(0)
+		_show_encounter()
 		stop = true
 	elif sim.s["event"] != null:
 		sfx("page")
@@ -571,7 +588,9 @@ func _refresh_fleet() -> void:
 			st += " · 船队货 %d/%d" % [sim.fleet_cargo_used(fl), sim.fleet_cargo_cap(fl)]
 		else:
 			st += " · 货 %d/%d" % [sim.cargo_used(sh), sim.cargo_cap(sh)]
-		v.add_child(UiKit.label(st, 14 if not esc else 12, UiKit.MUTED))
+		if int(sh.get("dmg", 0)) > 0:
+			st += " · 战损 %d%%" % int(sh["dmg"])
+		v.add_child(UiKit.label(st, 14 if not esc else 12, UiKit.MUTED if int(sh.get("dmg", 0)) == 0 else UiKit.TERRA))
 		if sh["route"] != null:
 			var r: Dictionary = sh["route"]
 			var rt := "航线 " + Sim.route_text(r)
@@ -1072,7 +1091,7 @@ func _best_known_sell(g: String, exclude: String) -> Dictionary:
 
 func _tab_yard(here: bool) -> void:
 	side_body.add_child(UiKit.para("买船后它会停在这里。给非旗舰设自动航线，它就会替你往返跑商。船队上限由名声决定（现在 %d 艘）；每艘船每月要付薪水和维护。" % sim.max_ships(), 14, UiKit.MUTED))
-	for t in GameData.SHIPS:
+	for t in GameData.yard_types():
 		var d: Dictionary = GameData.SHIPS[t]
 		var row := HBoxContainer.new()
 		row.add_child(UiKit.icon(UiKit.sprite("ships", d["sprite"]), 64))
@@ -1080,7 +1099,7 @@ func _tab_yard(here: bool) -> void:
 		v.add_theme_constant_override("separation", 0)
 		v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		v.add_child(UiKit.label("%s  ·  %s 金" % [d["name"], UiKit.money(sim.ship_price(t))], 17, UiKit.INK, true))
-		v.add_child(UiKit.label("货舱 %d · 航速 %.2f · 补给 %d/天 · 月薪 %d" % [d["cargo"], d["speed"], d["fuel_day"] * GameData.FUEL_PRICE, d["wage"]], 13, UiKit.MUTED))
+		v.add_child(UiKit.label("货舱 %d · 航速 %.2f · 炮 %d · 耐久 %d · 船员 %d · 补给 %d/天 · 月薪 %d" % [d["cargo"], d["speed"], d["guns"], d["hull"], d["crew"], d["fuel_day"] * GameData.FUEL_PRICE, d["wage"]], 12, UiKit.MUTED))
 		row.add_child(v)
 		var tt: String = t
 		var b := UiKit.button("购买", func(): _act(sim.buy_ship(tt, _port)); _refresh_fleet())
@@ -1300,7 +1319,7 @@ func _tab_hall() -> void:
 			b.add_theme_font_size_override("font_size", 13)
 			row.add_child(b)
 		side_body.add_child(row)
-	var cs := sim.open_contracts(_port)
+	var cs := sim.open_contracts(_port).filter(func(c): return c.get("kind", "trade") == "trade")
 	if not cs.is_empty():
 		side_body.add_child(HSeparator.new())
 		side_body.add_child(UiKit.label("本城委托", 16, UiKit.INK, true))
@@ -1372,11 +1391,32 @@ func _tab_guild() -> void:
 
 func _tab_tavern() -> void:
 	side_body.add_child(UiKit.label("委托板", 18, UiKit.INK, true))
-	var cs := sim.open_contracts()
+	var cs := sim.open_contracts().filter(func(c): return c.get("kind", "trade") == "trade")
 	if cs.is_empty():
 		side_body.add_child(UiKit.para("眼下没有委托。各港每隔一阵会张贴求购单，先把货送到的商会拿走全部酬金。", 14, UiKit.MUTED))
 	for c in cs:
 		side_body.add_child(_contract_row(c, {}, true))
+	side_body.add_child(HSeparator.new())
+	side_body.add_child(UiKit.label("悬赏榜", 18, UiKit.INK, true))
+	var bs := sim.open_bounties()
+	if bs.is_empty():
+		side_body.add_child(UiKit.para("眼下没有悬赏。云盗闹得凶的时候，城主会出钱请商会剿匪：接下悬赏、驶抵那座港就会开战。", 14, UiKit.MUTED))
+	for c in bs:
+		var p := PanelContainer.new()
+		p.add_theme_stylebox_override("panel", UiKit.box(Color("f3dcd0"), UiKit.TERRA, 5, 1, 6))
+		var row := HBoxContainer.new()
+		row.add_child(UiKit.icon(UiKit.sprite("ships", 7), 34))
+		var v := VBoxContainer.new()
+		v.add_theme_constant_override("separation", 0)
+		v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		v.add_child(UiKit.label("剿匪 · %s 外海 · 赏金 %s" % [GameData.port_name(c["port"]), UiKit.money(c["reward"])], 15, UiKit.INK, true))
+		var taken: bool = c.get("taker", "") == sim.pid()
+		v.add_child(UiKit.label("剩 %d 天 · 对方战力约 %d（我方 %d）%s" % [int(c["end"]) - int(sim.s["day"]), int(float(c["power"]) * 1.25), sim.fleet_power(sim.flagship()), " · 已接下，驶抵即开战" if taken else ""], 13, UiKit.TERRA if taken else UiKit.MUTED))
+		row.add_child(v)
+		var cid: int = c["id"]
+		row.add_child(UiKit.button("放弃" if taken else "接下", func(): _act(sim.take_bounty(cid)); _refresh_side(), taken))
+		p.add_child(row)
+		side_body.add_child(p)
 	side_body.add_child(HSeparator.new())
 	side_body.add_child(UiKit.label("酒馆", 18, UiKit.INK, true))
 	side_body.add_child(UiKit.para("消息贩子能告诉你所有港口此刻的价格。行情会变，过期的情报要小心。", 14, UiKit.MUTED))
@@ -1612,6 +1652,77 @@ func _choose_event(idx: int) -> void:
 		_show_event()
 
 
+func _show_encounter() -> void:
+	var e = sim.s["encounter"]
+	if e == null:
+		return
+	var bounty: bool = e["kind"] == "bounty"
+	var fl := sim.flagship()
+	var lines := [sim.encounter_text()]
+	var mine := []
+	for o in sim.fleet_ships(fl):
+		var u := sim.unit_of(o)
+		mine.append("%s 耐久 %d · 船员 %d · 炮 %d" % [o["name"], int(u["hp"]), int(u["crew"]), int(u["guns"])])
+	lines.append("我方：" + "；".join(mine) + "。主角战斗 %d 级，指挥点 %d。" % [sim.hero_abil("fight"), 1 + (sim.hero_abil("fight") - 1) / 4])
+	if bounty:
+		lines.append("这是你接下的悬赏目标，没有退路：打赢了领赏，输了就得付出代价。")
+	else:
+		lines.append("交过路费最省事；甩开要看航海本事和船速（成功率约 %d%%），甩不掉就只能硬碰硬。" % int(roundf(sim.flee_chance() * 100.0)))
+	var btns := [["应战", func(): _close_modal(); sim.encounter_fight(); _open_battle()]]
+	if not bounty:
+		btns.append(["交过路费 · %s 金" % UiKit.money(sim.toll()), func(): _act(sim.encounter_pay()); _close_modal(); _refresh_all(), true])
+		btns.append(["甩开他们", func():
+			var r := sim.encounter_flee()
+			_close_modal()
+			if r.get("escaped", false):
+				sfx("sail")
+				_toast(r["msg"], "good")
+				_refresh_all()
+			else:
+				_toast("甩不掉，接战！", "bad")
+				_open_battle(), true])
+	_modal("剿匪 · %s" % GameData.port_name(fl["port"]) if bounty else "云盗拦路", "events/00", lines, btns, 720)
+
+
+func _open_battle() -> void:
+	if sim.battle == null:
+		return
+	_set_speed(0)
+	sfx("gong")
+	battle_view.visible = true
+	battle_view.open(sim.battle)
+
+
+func _on_battle_finished() -> void:
+	battle_view.visible = false
+	var out := sim.end_battle()
+	if not out.get("ok", true):
+		return
+	var res: String = out["res"]
+	var lines := [{"win": "云盗的旗舰失守，残部四散逃进云层。", "loss": "旗舰被打得千疮百孔，云盗搬空了货舱才扬长而去。", "withdraw": "船队退出了战场，云盗没有追来。"}[res]]
+	var parts := []
+	if int(out["bounty"]) > 0:
+		parts.append("悬赏 %s 金" % UiKit.money(out["bounty"]))
+	if int(out["gold"]) != 0:
+		parts.append("金币 %+d" % int(out["gold"]))
+	for gq in out["goods"]:
+		parts.append("%s ×%d" % [GameData.good_name(gq[0]), int(gq[1])])
+	if int(out["rep"]) > 0:
+		parts.append("名声 +%d" % int(out["rep"]))
+	if int(out["exp"]) > 0:
+		parts.append("主角经验 +%d" % int(out["exp"]))
+	if not parts.is_empty():
+		lines.append("收获：" + "、".join(parts) + "。")
+	if not out["won"].is_empty():
+		lines.append("俘获：" + "、".join(out["won"]) + "。")
+	if not out["lost"].is_empty():
+		lines.append("失去：" + "、".join(out["lost"]) + "。")
+	if res == "win":
+		sfx("coin")
+	_modal({"win": "大获全胜", "loss": "败北", "withdraw": "撤退"}[res], "events/09" if res == "loss" else "events/00", lines, [["继续", func(): _close_modal(); _refresh_all()]], 640)
+	_refresh_all()
+
+
 func _confirm_route(ship_id: int, stops: Array) -> void:
 	var res := sim.set_route(ship_id, {"stops": stops})
 	_act(res)
@@ -1668,8 +1779,15 @@ func _ship_card(sh: Dictionary) -> Control:
 	tv.add_theme_constant_override("separation", 0)
 	tv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	tv.add_child(UiKit.label("%s%s · %s" % ["★ " if sh["flagship"] else "", sh["name"], GameData.SHIPS[sh["type"]]["name"]], 16, UiKit.INK, true))
-	tv.add_child(UiKit.label("货舱 %d · 航速 ×%.2f · 炮位 %d · 耐久 +%d%%" % [sim.cargo_cap(sh), sim.speed_mult(sh), sim.mod_lvl(sh, "guns") * 2, sim.mod_lvl(sh, "hull") * 20], 12, UiKit.MUTED))
+	var bu := sim.unit_of(sh)
+	tv.add_child(UiKit.label("货舱 %d · 航速 ×%.2f · 炮 %d · 耐久 %d/%d · 船员 %d" % [sim.cargo_cap(sh), sim.speed_mult(sh), int(bu["guns"]), int(bu["hp"]), int(bu["hp_max"]), int(bu["crew"])], 12, UiKit.MUTED if int(sh.get("dmg", 0)) == 0 else UiKit.TERRA))
 	hd.add_child(tv)
+	if int(sh.get("dmg", 0)) > 0:
+		var rpb := UiKit.button("修理 %s 金" % UiKit.money(sim.repair_cost(sh)), func(): _act(sim.repair_ship(id)); _refresh_fleet(); _refresh_side())
+		rpb.add_theme_font_size_override("font_size", 12)
+		rpb.tooltip_text = "战损 %d%%。停在港口每天也会自己修好一点。" % int(sh["dmg"])
+		rpb.disabled = sim.house()["gold"] < sim.repair_cost(sh)
+		hd.add_child(rpb)
 	var name_edit := LineEdit.new()
 	name_edit.text = sh["name"]
 	name_edit.max_length = 8

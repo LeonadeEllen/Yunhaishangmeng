@@ -131,10 +131,46 @@ const WH_UPGRADE := 3000
 const WH_RENT_PER_100 := 50   # per month
 
 # ------------------------------------------------------------------ ships
+# hull = battle hit points, crew = boarding strength (and gunnery), guns = cannon count.
+# pirate = true: never sold at a yard, only met in the clouds (and captured there).
 const SHIPS := {
-	"survey":    {"name": "测绘艇",   "price": 6000,  "cargo": 30,  "speed": 1.35, "fuel_day": 6,  "wage": 300,  "sprite": 0},
-	"freighter": {"name": "货艇",     "price": 12000, "cargo": 80,  "speed": 1.0,  "fuel_day": 9,  "wage": 600,  "sprite": 2},
-	"galleon":   {"name": "盖伦飞艇", "price": 26000, "cargo": 160, "speed": 0.85, "fuel_day": 14, "wage": 1100, "sprite": 3},
+	"survey":    {"name": "测绘艇",   "price": 6000,  "cargo": 30,  "speed": 1.35, "fuel_day": 6,  "wage": 300,  "sprite": 0, "hull": 40,  "crew": 8,  "guns": 0},
+	"freighter": {"name": "货艇",     "price": 12000, "cargo": 80,  "speed": 1.0,  "fuel_day": 9,  "wage": 600,  "sprite": 2, "hull": 70,  "crew": 14, "guns": 2},
+	"gunboat":   {"name": "炮舰",     "price": 20000, "cargo": 50,  "speed": 1.1,  "fuel_day": 10, "wage": 800,  "sprite": 4, "hull": 90,  "crew": 20, "guns": 4},
+	"galleon":   {"name": "盖伦飞艇", "price": 26000, "cargo": 160, "speed": 0.85, "fuel_day": 14, "wage": 1100, "sprite": 3, "hull": 110, "crew": 24, "guns": 3},
+	"ironclad":  {"name": "铁甲舰",   "price": 48000, "cargo": 100, "speed": 0.8,  "fuel_day": 16, "wage": 1500, "sprite": 5, "hull": 160, "crew": 30, "guns": 6},
+	"p_sloop":   {"name": "云盗快船", "price": 9000,  "cargo": 40,  "speed": 1.3,  "fuel_day": 7,  "wage": 350,  "sprite": 7, "hull": 50,  "crew": 12, "guns": 2, "pirate": true},
+	"p_raider":  {"name": "云盗掠船", "price": 16000, "cargo": 70,  "speed": 1.0,  "fuel_day": 10, "wage": 650,  "sprite": 1, "hull": 85,  "crew": 22, "guns": 4, "pirate": true},
+	"p_lord":    {"name": "云盗主舰", "price": 40000, "cargo": 120, "speed": 0.8,  "fuel_day": 15, "wage": 1100, "sprite": 8, "hull": 150, "crew": 36, "guns": 7, "pirate": true},
+}
+
+# ------------------------------------------------------------------ sailing & battle
+# Seasonal wind as a unit vector in map space (y grows downward). Sailing with it is faster.
+const WIND := [Vector2(-1, 0), Vector2(0, -1), Vector2(1, 0), Vector2(0, 1)]   # 东风 blows west, 南风 north, 西风 east, 北风 south
+const WIND_NAMES := ["东风", "南风", "西风", "北风"]
+const WIND_EFFECT := 0.15          # ±15% travel days between full head- and tail-wind
+const ENCOUNTER_CHANCE := 0.06     # per voyage of a laden flagship after day 60
+const TOLL_RATE := 0.06            # pirates' price for leaving you alone (of your gold, min TOLL_MIN)
+const TOLL_MIN := 300
+const REPAIR_RATE := 0.3           # yard repair = price × damage share × this
+const DOCK_REPAIR := 4             # damage points a docked ship mends per day for free
+const BOUNTY_REP := 100
+const HEX_W := 11
+const HEX_H := 7
+const TERRAIN := {
+	"storm":   {"name": "雷云",     "desc": "回合结束时停在里面的船掉 6 点耐久"},
+	"fog":     {"name": "浓雾",     "desc": "里面的船受到的炮击伤害 −35%"},
+	"updraft": {"name": "上升气流", "desc": "进入不耗移动力"},
+	"rock":    {"name": "浮岩",     "desc": "挡路，也挡住炮火"},
+}
+# Protagonist's commands, one command point each, each once per round; unlocked by hero level.
+const TACTICS := {
+	"focus":   {"name": "集火", "lvl": 1,  "desc": "选一艘敌船：本回合我方对它的炮击伤害 +50%", "target": "enemy"},
+	"rally":   {"name": "鼓舞", "lvl": 2,  "desc": "全体我方士气 +25", "target": ""},
+	"wind":    {"name": "顺风", "lvl": 4,  "desc": "本回合全体我方移动力 +2", "target": ""},
+	"smoke":   {"name": "烟幕", "lvl": 6,  "desc": "在一艘我方船所在格放两回合浓雾", "target": "ally"},
+	"fire":    {"name": "火攻", "lvl": 8,  "desc": "旗舰 3 格内的一艘敌船和它周围的敌船各掉 12 点耐久", "target": "enemy"},
+	"lure":    {"name": "诱敌", "lvl": 10, "desc": "把一艘敌船拉向旗舰 2 格，它的士气 −10", "target": "enemy"},
 }
 # Refits done at any shipyard, 0-3 levels each. Gold is a share of the hull's price; goods are
 # taken from the ship's hold, then your warehouse here, then bought at the market.
@@ -168,7 +204,7 @@ const HERO_ABIL_NAMES := {"sail": "航海", "trade": "交易", "fight": "战斗"
 const HERO_ABIL_DESC := {
 	"sail": "每级航程缩短 3%，补给随之减少。",
 	"trade": "每级买价便宜 1%，卖价高 1%。",
-	"fight": "空战时的指挥点与士气（第 8 轮启用）。",
+	"fight": "空战：每级炮击 +8%、接舷 +10%；每 4 级多 1 指挥点。",
 	"charm": "每级在各城积累友好度快 10%。",
 }
 const HERO_MAX_ABIL := 10
@@ -258,6 +294,22 @@ static func distance(a: String, b: String) -> float:
 
 static func travel_days(a: String, b: String, ship_type: String) -> int:
 	return maxi(1, int(ceil(distance(a, b) / (PX_PER_DAY * float(SHIPS[ship_type]["speed"])))))
+
+
+## Wind multiplier on travel time for a voyage a → b on the given day (1.0 ± WIND_EFFECT).
+static func wind_factor(a: String, b: String, day: int) -> float:
+	var w: Vector2 = WIND[(day % DAYS_YEAR) / 90]
+	var heading: Vector2 = ((PORTS[b]["pos"] as Vector2) - (PORTS[a]["pos"] as Vector2)).normalized()
+	return 1.0 - WIND_EFFECT * heading.dot(w)
+
+
+static func wind_name(day: int) -> String:
+	return WIND_NAMES[(day % DAYS_YEAR) / 90]
+
+
+## Ship types a yard sells.
+static func yard_types() -> Array:
+	return SHIPS.keys().filter(func(t): return not SHIPS[t].get("pirate", false))
 
 
 static func date_text(day: int) -> String:
