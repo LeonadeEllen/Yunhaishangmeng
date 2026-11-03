@@ -51,6 +51,8 @@ var tut_label: Label
 var hint_panel: PanelContainer
 var hint_label: Label
 var tut_skip: Button
+var fade: ColorRect              # town enter/leave transition (round 23)
+var _season_col := Color.WHITE
 var crisis_label: Label
 var modal_layer: Control
 var hover_card: PanelContainer
@@ -69,6 +71,14 @@ func _ready() -> void:
 	music.stream = ms
 	music.volume_db = -13.0
 	music.name = "Music"
+	AudioServer.add_bus()
+	var bi := AudioServer.bus_count - 1
+	AudioServer.set_bus_name(bi, "Music")
+	var lp := AudioEffectLowPassFilter.new()
+	lp.cutoff_hz = 900.0
+	AudioServer.add_bus_effect(bi, lp)
+	AudioServer.set_bus_effect_enabled(bi, 0, false)
+	music.bus = "Music"
 	add_child(music)
 	_sfx_players.append(music)   # keeps it alive across screen changes
 	music.play()
@@ -389,6 +399,11 @@ func _build_game() -> void:
 	modal_layer.set_anchors_preset(Control.PRESET_FULL_RECT)
 	modal_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(modal_layer)
+	fade = ColorRect.new()
+	fade.color = Color(0.07, 0.1, 0.13, 0.0)
+	fade.set_anchors_preset(Control.PRESET_FULL_RECT)
+	fade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(fade)
 	_refresh_all()
 
 
@@ -514,6 +529,7 @@ func _after_day() -> bool:
 	if sim.s["day"] % 90 == 0 and sim.s["day"] > 0:
 		var season: String = GameData.SEASONS[(int(sim.s["day"]) % 360) / 90]
 		_toast("入%s。%s" % [season, GameData.date_text(sim.s["day"]).split(" · ")[0]], "info")
+		_update_mood(true)
 	if sim.s["day"] % GameData.DAYS_MONTH == 0:
 		_save()
 	if sim.s["day"] != _last_day:
@@ -783,8 +799,9 @@ func _enter_town() -> void:
 	_in_town = true
 	_town_kind = ""
 	town.open(_port)
-	town.visible = true
-	map.visible = false
+	_fade_through(func():
+		town.visible = true
+		map.visible = false)
 	_refresh_region_btn()
 	_refresh_side()
 
@@ -792,10 +809,40 @@ func _enter_town() -> void:
 func _leave_town() -> void:
 	_in_town = false
 	_town_kind = ""
-	town.visible = false
-	map.visible = true
+	_fade_through(func():
+		town.visible = false
+		map.visible = true)
 	_refresh_region_btn()
 	_refresh_side()
+
+
+## A short dip to dark between two screens (round 23).
+func _fade_through(swap: Callable) -> void:
+	if fade == null:
+		swap.call()
+		return
+	var tw := create_tween()
+	tw.tween_property(fade, "color:a", 1.0, 0.16)
+	tw.tween_callback(swap)
+	tw.tween_property(fade, "color:a", 0.0, 0.28)
+
+
+## Music sounds muffled inside a building; the map is tinted by the season (round 23).
+func _update_mood(animate: bool = false) -> void:
+	var bi := AudioServer.get_bus_index("Music")
+	if bi >= 0:
+		AudioServer.set_bus_effect_enabled(bi, 0, _in_town and _town_kind != "")
+	if map == null or sim == null:
+		return
+	var season := (int(sim.s["day"]) % GameData.DAYS_YEAR) / 90
+	var col: Color = [Color(0.96, 1.0, 0.96), Color(1.0, 0.985, 0.93), Color(1.0, 0.95, 0.88), Color(0.9, 0.94, 1.0)][season]
+	if col == _season_col:
+		return
+	_season_col = col
+	if animate:
+		create_tween().tween_property(map, "modulate", col, 1.2)
+	else:
+		map.modulate = col
 
 
 func _on_building_entered(kind: String) -> void:
@@ -810,6 +857,7 @@ func _on_building_entered(kind: String) -> void:
 func _refresh_side() -> void:
 	if side_body == null:
 		return
+	_update_mood()
 	if _spot != "":
 		UiKit.clear(side_body)
 		_spot_panel()
@@ -2293,16 +2341,57 @@ func _lighthouse_cutscene(stage: int) -> void:
 	], [["继续", func(): _close_modal(); if sim.s["event"] != null: _show_event()]], 520)
 	var holder := CenterContainer.new()
 	holder.custom_minimum_size = Vector2(520, 300)
+	holder.clip_contents = true
+	# a warm glow behind the tower, lit once it stands
+	var glow := TextureRect.new()
+	var gt := GradientTexture2D.new()
+	var gr := Gradient.new()
+	gr.set_color(0, Color(1.0, 0.86, 0.5, 0.95))
+	gr.set_color(1, Color(1.0, 0.8, 0.4, 0.0))
+	gt.gradient = gr
+	gt.fill = GradientTexture2D.FILL_RADIAL
+	gt.fill_from = Vector2(0.5, 0.5)
+	gt.fill_to = Vector2(0.5, 0.0)
+	gt.width = 64
+	gt.height = 64
+	glow.texture = gt
+	glow.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	glow.custom_minimum_size = Vector2(300, 300)
+	glow.pivot_offset = Vector2(150, 150)
+	glow.modulate.a = 0.0
+	holder.add_child(glow)
+	# the beam that sweeps once the lamp is lit
+	var beam := ColorRect.new()
+	beam.color = Color(1.0, 0.95, 0.7, 0.0)
+	beam.custom_minimum_size = Vector2(900, 26)
+	beam.pivot_offset = Vector2(0, 13)
+	beam.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var img := UiKit.icon(UiKit.sprite("lighthouse", st["sprite"]), 280)
 	img.pivot_offset = Vector2(140, 280)
 	img.scale = Vector2(1.0, 0.05)
 	img.modulate.a = 0.0
 	holder.add_child(img)
+	holder.add_child(beam)
 	v.add_child(holder)
 	v.move_child(holder, 0)
 	var tw := create_tween()
 	tw.tween_property(img, "modulate:a", 1.0, 0.3)
 	tw.parallel().tween_property(img, "scale", Vector2.ONE, 1.4).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(glow, "modulate:a", 1.0, 0.8)
+	tw.parallel().tween_property(glow, "scale", Vector2(1.15, 1.15), 0.8).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tw.tween_callback(func():
+		beam.position = Vector2(260, 40)
+		beam.rotation = -0.9
+		var bt := create_tween()
+		bt.tween_property(beam, "color:a", 0.55, 0.2)
+		bt.parallel().tween_property(beam, "rotation", 0.9, 1.6).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		bt.tween_property(beam, "color:a", 0.0, 0.4)
+		if not is_instance_valid(glow) or not glow.is_inside_tree():
+			return
+		var pulse := create_tween().set_loops()
+		pulse.tween_property(glow, "scale", Vector2(1.0, 1.0), 1.1).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		pulse.tween_property(glow, "scale", Vector2(1.15, 1.15), 1.1).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		glow.tree_exiting.connect(func(): pulse.kill()))
 
 
 func _crown_celebration() -> void:

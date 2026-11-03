@@ -328,6 +328,18 @@ func run(m: Control) -> void:
 	await _wait(0.6)
 	await _shot("28_town_lanterns")
 	main._leave_town()
+	# round 23: the lighthouse rising with its glow and beam, and a winter-tinted map
+	await _wait(0.5)
+	main._lighthouse_cutscene(1)
+	await _wait(2.6)
+	await _shot("36_lighthouse_rise")
+	main._close_modal()
+	main.sim.s["day"] = GameData.DAYS_YEAR + 300
+	main._update_mood()
+	main.map.set_region(1)
+	await _wait(0.4)
+	await _shot("37_winter_map")
+	main.sim.s["day"] = GameData.DAYS_YEAR
 	# round 17: a companion's errand and the crew panel
 	main._close_modal()
 	main.sim.s["event"] = null
