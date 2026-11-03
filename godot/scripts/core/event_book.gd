@@ -271,6 +271,12 @@ static func rival_meeting(sim: Sim, hid: String) -> void:
 	if st == "ally":
 		text += " %s是你的盟友，寒暄得格外热络。" % hh["leader"]
 		choices.append({"label": "交换行情（盟友之间，免费拿到全部港口的最新行情）", "effects": {"intel_share": hid}})
+		# borrow one of their empty ships for a while (round 27)
+		var cands := sim.loan_candidates(hid, port)
+		if not cands.is_empty() and sim.fleet_ships(fl).size() < GameData.FLEET_MAX:
+			var ls: Dictionary = cands[0]
+			choices.append({"label": "借%s的%s（%s）%d 天，编入船队（租金 %s 金）" % [he, ls["name"], GameData.SHIPS[ls["type"]]["name"], GameData.LOAN_DAYS, UiKit.money(sim.loan_rent(ls))],
+				"effects": {"borrow": {"hid": hid, "ship_id": int(ls["id"])}}})
 	elif st == "feud":
 		text += " %s看见你，脸色沉了下来。" % hh["leader"]
 		choices.append({"label": "赔一坛好酒修好（800 金，关系 +10）", "effects": {"gold": -800, "tie": {"hid": hid, "d": 10}, "say": "%s接了酒，没说话，但也没把酒倒掉。" % hh["leader"]}})
@@ -283,6 +289,16 @@ static func rival_meeting(sim: Sim, hid: String) -> void:
 			"effects": {"gold": -300, "friend": 40, "tie": {"hid": hid, "d": GameData.TIE_DRINK}, "say": drink[hid]}})
 	choices.append({"label": "点头致意，各忙各的", "effects": {}})
 	sim.s["event"] = {"id": "rival:%s" % hid, "title": "%s · %s在港" % [hh["leader"], hh["name"]], "text": text, "art": "events/14", "choices": choices}
+
+
+## An allied house in a debt crisis asks the player for help (round 27).
+static func open_bail(sim: Sim, hid: String, need: int) -> void:
+	var hh: Dictionary = GameData.HOUSES[hid]
+	var me: String = GameData.HOUSES[sim.pid()]["leader"]
+	var ask := {"iron": "韦朔的信只有两行：「%s，船坞的账周转不开了。借我一笔，开春还你。」", "tower": "殷望舒的信写得体面，意思却只有一个：「%s，白塔议士的账上见了底。盟友之间，不必多言。」", "lamp": "霍照野的信里还夹着一张灯油的收据：「%s，这回真是灯油钱都掏不出了。帮一把？」"}
+	sim.s["event"] = {"id": "bail:%s" % hid, "title": "%s · 盟友求援" % hh["name"], "text": ask[hid] % me, "art": "story_letter", "choices": [
+		{"label": "出手相助（%s 金，关系 +%d）" % [UiKit.money(need), GameData.BAIL_TIE], "effects": {"bail": {"hid": hid, "gold": need}}},
+		{"label": "爱莫能助（关系 −%d）" % GameData.BAIL_REFUSE_TIE, "effects": {"tie": {"hid": hid, "d": -GameData.BAIL_REFUSE_TIE}, "say": "%s没有回信。" % hh["leader"]}}]}
 
 
 ## A rival leader's farewell when their house goes under (round 24).
@@ -490,6 +506,22 @@ static func resolve(sim: Sim, choice: int) -> Dictionary:
 		sim.add_tie(sim.pid(), fx["tie"]["hid"], int(fx["tie"]["d"]))
 	if fx.has("ally"):
 		sim.set_tie(sim.pid(), fx["ally"], maxi(sim.tie(fx["ally"]), GameData.TIE_ALLY + 10))
+	if fx.has("borrow"):
+		var br: Dictionary = fx["borrow"]
+		var rb := sim.borrow_ship(br["hid"], int(br["ship_id"]))
+		msgs.append(str(rb["msg"]))
+	if fx.has("bail"):
+		var bl: Dictionary = fx["bail"]
+		var need := int(bl["gold"])
+		if h["gold"] >= float(need):
+			h["gold"] -= need
+			h["month_out"] += need
+			sim.house(bl["hid"])["gold"] += need
+			sim.house(bl["hid"])["month_in"] += need
+			sim.add_tie(sim.pid(), bl["hid"], GameData.BAIL_TIE)
+			msgs.append("%s收到钱，回了一封很短的信：「记下了。」" % GameData.HOUSES[bl["hid"]]["leader"])
+		else:
+			msgs.append("金币不足，这笔钱你拿不出来。")
 	if fx.has("intel_share"):
 		for port in sim.open_ports():
 			sim._update_intel(port)

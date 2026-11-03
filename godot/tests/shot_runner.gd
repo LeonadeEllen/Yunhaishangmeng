@@ -337,6 +337,24 @@ func run(m: Control) -> void:
 	await _wait(0.4)
 	await _shot("40_ties")
 	main._close_modal()
+	# round 27: borrow an ally's ship
+	var fl5: Dictionary = main.sim.flagship()
+	main.sim._add_ship("iron", "galleon", fl5["port"], "铁翼号")
+	main.sim.s["event"] = null
+	EventBook.rival_meeting(main.sim, "iron")
+	main._show_event()
+	await _wait(0.4)
+	await _shot("41_borrow")
+	var bi := 0
+	for i in main.sim.s["event"]["choices"].size():
+		if main.sim.s["event"]["choices"][i]["effects"].has("borrow"):
+			bi = i
+	main._choose_event(bi)
+	await _wait(0.3)
+	main._close_modal()
+	main._refresh_all()
+	await _wait(0.3)
+	await _shot("42_fleet_loan")
 	main.sim.s["event"] = null
 	EventBook.festival_challenge(main.sim, "iron")
 	main._show_event()

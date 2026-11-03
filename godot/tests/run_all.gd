@@ -20,6 +20,7 @@ func _init() -> void:
 		test_milestones()
 		test_leaders()
 		test_ties()
+		test_allies()
 		print("FAILURES: %d" % failures)
 		quit(1 if failures > 0 else 0)
 		return
@@ -43,6 +44,7 @@ func _init() -> void:
 	test_milestones()
 	test_leaders()
 	test_ties()
+	test_allies()
 	var seeds := [11, 22, 33, 44, 55]
 	var crowns := 0
 	var bot_stage := 0
@@ -1250,3 +1252,105 @@ func test_ties() -> void:
 	# save round-trip
 	var sim4 := Sim.new()
 	check(sim4.from_json(sim.to_json()) and sim4.tie("iron") == sim.tie("iron") and typeof(sim4.s["ties"].values()[0]) == TYPE_INT and sim4.tie_state("tower") == "ally", "relationships survive a save")
+
+
+func test_allies() -> void:
+	print("what an ally is good for: borrowed ships, joint buyouts, bail-outs (round 27)")
+	var sim := Sim.new()
+	sim.new_game(27)
+	sim.s["story"] = 3
+	sim.s["day"] = 1
+	var me := sim.pid()
+	var fl := sim.flagship()
+	sim.house()["gold"] = 50000.0
+	sim.set_tie(me, "iron", 50)
+	var ls: Dictionary = sim._add_ship("iron", "galleon", fl["port"])
+	check(sim.loan_candidates("iron", fl["port"]).size() == 1 and sim.loan_candidates("tower", fl["port"]).is_empty(), "an ally's empty ship docked beside the flagship can be borrowed")
+	EventBook.rival_meeting(sim, "iron")
+	var ci := -1
+	for i in sim.s["event"]["choices"].size():
+		if sim.s["event"]["choices"][i]["effects"].has("borrow"):
+			ci = i
+	check(ci >= 0, "the ally's captain offers the ship")
+	var rent := sim.loan_rent(ls)
+	var ig0: float = sim.house("iron")["gold"]
+	check(EventBook.resolve(sim, ci)["ok"] and ls["owner"] == me and sim.in_fleet(ls) and ls["loan"]["hid"] == "iron" and int(ls["loan"]["until"]) == 1 + GameData.LOAN_DAYS and sim.house()["gold"] == 50000.0 - rent and sim.house("iron")["gold"] == ig0 + rent, "borrowing pays %d rent and puts the ship in the fleet for %d days" % [rent, GameData.LOAN_DAYS])
+	check(sim.fleet_ships(fl).size() == 2 and sim.fleet_cargo_cap(fl) > sim.cargo_cap(fl) and not sim.sell_ship(int(ls["id"]))["ok"], "it carries cargo with the fleet and cannot be sold")
+	check(sim.own_ships().size() == sim.ships_of().size() - 1, "a borrowed ship does not count against the fleet limit")
+	var sim_b := Sim.new()
+	check(sim_b.from_json(sim.to_json()) and sim_b.ship(int(ls["id"])).has("loan") and typeof(sim_b.ship(int(ls["id"]))["loan"]["until"]) == TYPE_INT, "the loan survives a save")
+	var good: String = GameData.traded_goods(fl["port"])[0]
+	ls["cargo"] = {good: {"qty": 10, "cost": 1.0}}
+	var g1: float = sim.house()["gold"]
+	sim.s["day"] = int(ls["loan"]["until"])
+	sim._tick_loans()
+	check(ls["owner"] == "iron" and not sim.in_fleet(ls) and not ls.has("loan") and ls["cargo"].is_empty() and sim.house()["gold"] > g1 and str(sim.s["log"][-1][1]).contains("到期还给"), "when the time is up it goes home and its cargo is sold")
+	check(sim.borrow_ship("iron", int(ls["id"]))["ok"], "it can be borrowed again")
+	sim.set_tie(me, "iron", 0)
+	sim._tick_loans()
+	check(ls["owner"] == "iron", "the alliance ending sends it home early")
+	sim.set_tie(me, "iron", 50)
+	check(sim.borrow_ship("iron", int(ls["id"]))["ok"], "borrowed a third time")
+	sim.house("iron")["bankrupt"] = true
+	sim._tick_loans()
+	check(ls["owner"] == me and not ls.has("loan"), "a lender going under leaves the ship with you")
+	sim.house("iron")["bankrupt"] = false
+	ls["owner"] = "iron"
+	ls["fleet"] = 0
+	check(sim.borrow_ship("iron", int(ls["id"]))["ok"], "borrowed a fourth time")
+	var t0 := sim.tie("iron")
+	var g2: float = sim.house()["gold"]
+	sim._loan_lost(ls)
+	check(sim.house()["gold"] == g2 - int(float(GameData.SHIPS["galleon"]["price"]) * GameData.LOAN_LOST) and sim.tie("iron") == t0 - GameData.LOAN_LOST_TIE, "losing a borrowed ship costs half its price and %d relationship" % GameData.LOAN_LOST_TIE)
+	sim._remove_ship(ls)
+	# a joint buyout: an ally pays 30%
+	sim.set_tie(me, "iron", 50)
+	sim.house("iron")["gold"] = 100000.0
+	sim.house("tower")["gold"] = 100000.0
+	sim.house("tower")["bp"]["fish"] = true
+	sim.house()["bp"]["fish"] = true
+	sim.house()["gold"] = 50000.0
+	var plot := -1
+	for i in sim.s["ports"]["muxia"]["plots"].size():
+		if Industry.build(sim, "muxia", i, "fish", "tower")["ok"]:
+			plot = i
+			break
+	check(plot >= 0, "the third house built a fishery")
+	var cost := Industry.buyout_cost(sim, "muxia", plot)
+	var r := Industry.buyout(sim, "muxia", plot)
+	check(r["ok"] and sim.house()["gold"] == 50000.0 - cost + int(float(cost) * GameData.ALLY_BUYOUT_SHARE) and sim.house("iron")["gold"] == 100000.0 - int(float(cost) * GameData.ALLY_BUYOUT_SHARE) and str(r["msg"]).contains("盟友铁誓舰团出了"), "the ally pays %d%% of a buyout against the third house" % int(roundf(GameData.ALLY_BUYOUT_SHARE * 100.0)))
+	sim.set_tie("iron", "tower", 50)
+	check(sim._allies_pay(me, 1000, "tower").is_empty(), "nobody funds a move against their own ally")
+	# bail-outs
+	var sim2 := Sim.new()
+	sim2.new_game(27)
+	sim2.s["story"] = 3
+	sim2.s["day"] = 1
+	sim2.set_tie("iron", "tower", 50)
+	sim2.house("tower")["gold"] = 200000.0
+	sim2.house("iron")["gold"] = -5000.0
+	sim2.s["event"] = null
+	sim2._tick_crisis()
+	check(sim2.house("iron")["gold"] == 2000.0 and sim2.house("tower")["gold"] == 193000.0 and sim2.tie("iron", "tower") == 50 + GameData.BAIL_TIE and str(sim2.s["log"][-1][1]).contains("还了"), "an AI ally pays an ally's debt and the pair warms")
+	sim2.set_tie(sim2.pid(), "tower", 50)
+	sim2.house("tower")["gold"] = -3000.0
+	sim2.house("tower")["crisis"] = 0
+	sim2.house()["gold"] = 100000.0
+	sim2.s["event"] = null
+	sim2._tick_crisis()
+	check(sim2.s["event"] != null and str(sim2.s["event"]["id"]) == "bail:tower", "an allied house without a rich AI ally asks the player")
+	check(EventBook.resolve(sim2, 0)["ok"] and sim2.house()["gold"] == 95000.0 and sim2.house("tower")["gold"] == 2000.0 and sim2.tie("tower") == 50 + GameData.BAIL_TIE, "helping costs the need and warms the pair by %d" % GameData.BAIL_TIE)
+	sim2.set_tie(sim2.pid(), "iron", 50)
+	sim2.house("iron")["gold"] = -1000.0
+	sim2.house("iron")["crisis"] = 0
+	sim2.house("tower")["gold"] = 1000.0
+	sim2.s["event"] = null
+	sim2._tick_crisis()
+	check(sim2.s["event"] != null and str(sim2.s["event"]["id"]) == "bail:iron", "the poorer AI ally cannot help, so the player is asked")
+	check(EventBook.resolve(sim2, 1)["ok"] and sim2.tie("iron") == 50 - GameData.BAIL_REFUSE_TIE and sim2.tie_state("iron") == "plain", "refusing costs %d and can end the alliance" % GameData.BAIL_REFUSE_TIE)
+	sim2.set_tie(sim2.pid(), "iron", 50)
+	sim2.house("iron")["gold"] = -50000.0
+	sim2.house("iron")["crisis"] = 0
+	sim2.s["event"] = null
+	sim2._tick_crisis()
+	check(sim2.s["event"] == null, "no request when the need is beyond %d%% of the player's gold" % int(roundf(GameData.BAIL_MAX * 100.0)))

@@ -241,7 +241,7 @@ func _show_help() -> void:
 		"· 伙伴的故事：好感到 30 / 60 / 100 触发三章个人剧情，走完专长更强。好感到 60 的伙伴会托你办一件私事（限期送一批货到某港，在伙伴面板或那座港的酒馆交付），办成有谢礼、名声和好感，误期伤感情；办成后好感到 80 还有第二件更大的托付（送货、同行到某港或打赢一场空战），办成的伙伴从此不领薪水。两位、三位彼此相熟的伙伴之间也会有他们自己的场景。",
 		"· 对手：灯油行会靠跑商、铁誓舰团靠船队（船便宜、航速快、载货多）、白塔议士靠产业（工坊便宜、产地多产）。云盗对谁都下手，对手的船也会被劫。点顶栏的商会名随时看对手情报。",
 		"· 相遇：旗舰停进对手船所在的港口时，对手的当家可能来打招呼：赛船赌金、当众论道赌名声、向他们买地契和图纸、买通港务拖住他们的船，或者只是喝一杯。",
-		"· 盟与敌：三家之间各有一条关系。喝酒、送礼、买图纸拉近，赛船论道输的一方记仇，收购工坊、买通港务最伤。关系到 20 可在对手面板提议结盟，对手关系好时也会主动提：盟友不抢你的工坊、你开工建灯塔时出一份钱、灯节带贺礼、在港时交换行情。关系跌到 −40 或你主动翻脸就是宿敌：收购他们的工坊便宜 25%，赢他们名声 ×1.5，但他们会盯上你的工坊，灯节必来挑战。两家对手之间同样会结盟或翻脸：落后的两家往往走到一起对付领头的，领头的招人嫉恨。",
+		"· 盟与敌：三家之间各有一条关系。喝酒、送礼、买图纸拉近，赛船论道输的一方记仇，收购工坊、买通港务最伤。关系到 20 可在对手面板提议结盟，对手关系好时也会主动提：盟友不抢你的工坊、你开工建灯塔时出一份钱、灯节带贺礼、在港时交换行情。关系跌到 −40 或你主动翻脸就是宿敌：收购他们的工坊便宜 25%，赢他们名声 ×1.5，但他们会盯上你的工坊，灯节必来挑战。两家对手之间同样会结盟或翻脸：落后的两家往往走到一起对付领头的，领头的招人嫉恨。盟友还有三样用处：当家在港时能把一艘空船借给你 60 天（付租金，编入船队一起跑一起打，丢了要赔一半船价）；你收购工坊时手头宽裕的盟友出三成；盟友周转不开时会写信求援，帮不帮都记在关系上。",
 		"· 灯节：每年开春灯节，三项颁奖（赛船冠军看最快的船、年度商王看一年身家涨幅、建设之光看恩主城数），奖金与名声，并回顾各家这一年：三位当家各有一句话，你的伙伴里也有人上台。灯节 12 天里甜霞果、丝云绸、霞果酒卖价 +15%。灯节夜里对手的当家可能来约一场赛船或论道，赌注和名声都比平日大，谢绝不丢分。",
 		"· 会馆：在老家的商馆页扩建商会总部（三级）：伙伴上限、每月名声、伙伴薪水折扣，最高一级船队上限 +1。",
 		"· 城建：在任何城主府出资修码头（补给更省、修船更快）、集市（行情恢复更快）、学堂（本城工坊增产），每项三级，全城受益。出资最多的商会是本城恩主：买货更便宜、每月得名声、城中立像。对手有钱时也会出资来争。",
@@ -682,7 +682,8 @@ func _refresh_side_soft() -> void:
 func _refresh_fleet() -> void:
 	UiKit.clear(fleet_box)
 	var head := HBoxContainer.new()
-	head.add_child(UiKit.label("船队 %d/%d" % [sim.ships_of().size(), sim.max_ships()], 18, UiKit.INK, true))
+	var loans := sim.ships_of().size() - sim.own_ships().size()
+	head.add_child(UiKit.label("船队 %d/%d%s" % [sim.own_ships().size(), sim.max_ships(), (" · 借 %d" % loans) if loans > 0 else ""], 18, UiKit.INK, true))
 	fleet_box.add_child(head)
 	var fl := sim.flagship()
 	var ordered := sim.fleet_ships(fl)
@@ -700,7 +701,7 @@ func _refresh_fleet() -> void:
 		var v := VBoxContainer.new()
 		v.add_theme_constant_override("separation", 0)
 		v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		var title := "%s%s · %s%s" % ["★ " if sh["flagship"] else ("↳ " if esc else ""), sh["name"], GameData.SHIPS[sh["type"]]["name"], (" · " + GameData.SLOTS[sh.get("slot", "main")]) if esc else ""]
+		var title := "%s%s · %s%s%s" % ["★ " if sh["flagship"] else ("↳ " if esc else ""), sh["name"], GameData.SHIPS[sh["type"]]["name"], (" · " + GameData.SLOTS[sh.get("slot", "main")]) if esc else "", (" · 借自%s，还 %d 天" % [GameData.HOUSES[sh["loan"]["hid"]]["name"], maxi(0, int(sh["loan"]["until"]) - int(sim.s["day"]))]) if sh.has("loan") else ""]
 		v.add_child(UiKit.label(title, 16 if not esc else 14, UiKit.INK, true))
 		var st := ""
 		if sim.docked(sh):
@@ -1196,7 +1197,7 @@ func _greeting(kind: String) -> String:
 					best = g
 			return ("%s来了，今天%s收得最急。" % [leader, GameData.good_name(best)]) if warm else ("客官要买什么？今天%s行情最高。" % GameData.good_name(best))
 		"yard":
-			return "船要修要买都找我。名声到「%s」才能添第 %d 艘。" % [GameData.REP_NAMES[mini(sim.rep_level(), 5)], sim.max_ships() + 1] if sim.ships_of().size() >= sim.max_ships() else "新船随时能交付，%s，看看哪艘合眼缘。" % leader
+			return "船要修要买都找我。名声到「%s」才能添第 %d 艘。" % [GameData.REP_NAMES[mini(sim.rep_level(), 5)], sim.max_ships() + 1] if sim.own_ships().size() >= sim.max_ships() else "新船随时能交付，%s，看看哪艘合眼缘。" % leader
 		"post":
 			return "账房见过少主。仓库 %d / %d，工坊 %d 座。" % [Industry.wh_used(sim, _port, sim.pid()), Industry.wh_cap(sim, _port, sim.pid()), Industry.count_buildings(sim, _port, sim.pid())] if Industry.has_wh(sim, _port, sim.pid()) else "这里还没有你的商馆。开了商馆，货和工坊才有地方落脚。"
 		"hall":
@@ -1440,7 +1441,7 @@ func _tab_yard(here: bool) -> void:
 		row.add_child(v)
 		var tt: String = t
 		var b := UiKit.button("购买", func(): _act(sim.buy_ship(tt, _port)); _refresh_fleet())
-		b.disabled = sim.house()["gold"] < sim.ship_price(t) or sim.ships_of().size() >= sim.max_ships()
+		b.disabled = sim.house()["gold"] < sim.ship_price(t) or sim.own_ships().size() >= sim.max_ships()
 		row.add_child(b)
 		side_body.add_child(row)
 	var mine := sim.ships_of().filter(func(x): return sim.docked(x) and x["port"] == _port)
@@ -1582,7 +1583,9 @@ func _tab_post(here: bool) -> void:
 			var bc := Industry.buyout_cost(sim, _port, i)
 			var bb2 := UiKit.button("收购 %s" % UiKit.money(bc), func(): _act(Industry.buyout(sim, _port, idx)), true)
 			bb2.disabled = sim.house()["gold"] < bc or not sim.has_bp(g)
-			bb2.tooltip_text = "按 %.1f 倍造价收购对手的工坊；需要你也有这种货的图纸。" % GameData.BUYOUT_MULT
+			bb2.tooltip_text = "按 %.1f 倍造价收购对手的工坊；需要你也有这种货的图纸。%s" % [GameData.BUYOUT_MULT, ("宿敌的工坊打 %d 折。" % int(roundf(GameData.FEUD_BUYOUT * 10.0))) if sim.tie_state(pl["owner"]) == "feud" else ""]
+			if not sim.allies_of(hid).is_empty():
+				bb2.tooltip_text += "手头宽裕的盟友会出 %d%%。" % int(roundf(GameData.ALLY_BUYOUT_SHARE * 100.0))
 			bb2.add_theme_font_size_override("font_size", 12)
 			hb.add_child(bb2)
 		side_body.add_child(row)
@@ -2126,11 +2129,9 @@ func _show_event() -> void:
 
 
 func _choose_event(idx: int) -> void:
-	var res := EventBook.resolve(sim, idx)
+	EventBook.resolve(sim, idx)   # its outcome reaches the toasts through Sim.message
 	_close_modal()
 	_refresh_all()
-	if res["msg"] != "":
-		_toast(res["msg"], "info")
 	if sim.s["event"] != null:
 		_show_event()
 
@@ -2495,7 +2496,7 @@ func _ship_card(sh: Dictionary) -> Control:
 		ob.item_selected.connect(func(i): _act(sim.set_slot(id, keys[i])); _refresh_fleet())
 		ob.tooltip_text = "编队位置：影响空战的开局站位（第 8 轮）"
 		hd.add_child(ob)
-	if not sh["flagship"]:
+	if not sh["flagship"] and not sh.has("loan"):
 		var sb := UiKit.button("出售", func(): _act(sim.sell_ship(id)); _refresh_fleet(); _refresh_side(), true)
 		sb.add_theme_font_size_override("font_size", 12)
 		sb.tooltip_text = "卖掉这艘船，得 %s 金（船价六成）；船上的货会一并处理掉" % UiKit.money(GameData.SHIPS[sh["type"]]["price"] * 0.6)

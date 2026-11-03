@@ -391,6 +391,15 @@ const FEUD_DELAY_DAYS := 10
 const FEUD_BUYOUT := 0.75            # a 宿敌's workshop sells for this fraction of the usual buyout price
 const FEUD_REP_MULT := 1.5           # beating a 宿敌 in a race or debate pays this much more reputation
 const FEUD_RACE_MULT := 3.0          # feuding houses race each other this much more often
+# what an ally is good for (round 27)
+const LOAN_DAYS := 60                # a borrowed ally ship sails with the fleet this long
+const LOAN_RENT := 0.06              # rent, as a share of the ship's price
+const LOAN_LOST := 0.5               # compensation for a borrowed ship lost in battle, share of its price
+const LOAN_LOST_TIE := 30
+const ALLY_BUYOUT_SHARE := 0.3       # an ally pays this share of a buyout against a third house
+const BAIL_TIE := 15                 # bailing an ally out of a debt crisis
+const BAIL_REFUSE_TIE := 20
+const BAIL_MAX := 0.3                # the player is asked only when the need is within this share of their gold
 const PLAYER := "lamp"
 
 # ------------------------------------------------------------------ protagonist

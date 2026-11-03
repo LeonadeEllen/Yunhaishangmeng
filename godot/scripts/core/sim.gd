@@ -272,6 +272,11 @@ func ships_of(hid: String = "") -> Array:
 	return _ships_of(hid)
 
 
+## The player's own ships: borrowed ones (round 27) do not count against the fleet limit.
+func own_ships() -> Array:
+	return _ships_of(pid()).filter(func(x): return not x.has("loan"))
+
+
 func flagship() -> Dictionary:
 	for sh in _ships_of(pid()):
 		if sh["flagship"]:
@@ -887,7 +892,7 @@ func depart(ship_id: int, dest: String) -> Dictionary:
 
 func buy_ship(type: String, port: String) -> Dictionary:
 	var h := house()
-	if _ships_of(pid()).size() >= max_ships():
+	if own_ships().size() >= max_ships():
 		return _fail("当前名声下船队最多 %d 艘。" % max_ships())
 	var price: int = ship_price(type)
 	if h["gold"] < price:
@@ -910,6 +915,8 @@ func sell_ship(ship_id: int) -> Dictionary:
 		return _fail("只能出售停在港口的飞艇。")
 	if _ships_of(pid()).size() <= 1:
 		return _fail("至少保留一艘飞艇。")
+	if sh.has("loan"):
+		return _fail("这是借来的船，到期会还给%s。" % GameData.HOUSES[sh["loan"]["hid"]]["name"])
 	if not sh["cargo"].is_empty():
 		return _fail("请先清空货舱。")
 	var v := int(GameData.SHIPS[sh["type"]]["price"] * 0.6 * (1.0 - 0.5 * float(sh.get("dmg", 0)) / 100.0))
@@ -2052,7 +2059,7 @@ func _discover(sh: Dictionary, sid: String) -> void:
 			lines.append("获得%s的秘传图纸。" % GameData.good_name(rw["bp"]))
 		if rw.has("ship"):
 			var port := nearest_open_port(sid)
-			if ships_of(pid()).size() < max_ships():
+			if own_ships().size() < max_ships():
 				var ns := _add_ship(pid(), rw["ship"], port, "拾遗号")
 				ns["dmg"] = 70
 				lines.append("「拾遗号」被拖到了 %s 的船坞，战损 70%%，修好就能用。" % GameData.port_name(port))
@@ -2259,6 +2266,8 @@ func end_battle() -> Dictionary:
 			var gone: bool = u["status"] == "sunk" or (u["status"] == "ok" and int(u["side"]) == 1 and res != "win")
 			if gone and not sh["flagship"]:
 				out["lost"].append(sh["name"])
+				if sh.has("loan"):
+					_loan_lost(sh)
 				_remove_ship(sh)
 			elif gone:
 				sh["dmg"] = 85
@@ -2268,7 +2277,7 @@ func end_battle() -> Dictionary:
 		elif res == "win":
 			if u["status"] == "ok" and int(u["side"]) == 0:
 				var price := int(GameData.SHIPS[u["type"]]["price"])
-				if _ships_of(pid()).size() < max_ships():
+				if own_ships().size() < max_ships():
 					var ns := _add_ship(pid(), u["type"], fl["port"])
 					ns["dmg"] = clampi(int(roundf(100.0 * (1.0 - float(u["hp"]) / float(u["hp_max"])))), 0, 95)
 					for k in ["from", "to", "depart", "arrive"]:
@@ -2375,6 +2384,7 @@ func advance_day() -> void:
 	_tick_fashion()
 	_tick_contracts()
 	_tick_ships()
+	_tick_loans()
 	_tick_lighthouses()
 	_tick_crew()
 	_tick_milestones()
@@ -2868,25 +2878,151 @@ func break_off(hid: String) -> Dictionary:
 	return {"ok": true, "msg": "你当众撕了%s的帖子。从今天起，两家是宿敌。" % GameData.HOUSES[hid]["name"]}
 
 
+## Each AI ally of a house that can spare it pays `each` into that house's chest (round 26/27).
+## Returns {ally: paid}. The player never pays automatically; `except` names a house whose allies
+## sit this one out (nobody funds a move against their own ally).
+func _allies_pay(hid: String, each: int, except: String = "") -> Dictionary:
+	var out := {}
+	if each <= 0:
+		return out
+	for o in allies_of(hid):
+		if o == pid() or (except != "" and tie_state(o, except) == "ally"):
+			continue
+		var oh := house(o)
+		if oh["gold"] < float(each) + AiPlayer.WORKING_CAPITAL:
+			continue
+		oh["gold"] -= each
+		oh["month_out"] += each
+		house(hid)["gold"] += each
+		house(hid)["month_in"] += each
+		out[o] = each
+	return out
+
+
 ## An ally pays a share of a lighthouse stage the other starts (round 26).
 func _ally_chip_in(hid: String, cost: int) -> void:
 	var share := int(float(cost) * GameData.ALLY_LH_SHARE) / 100 * 100
-	if share <= 0:
-		return
-	for o in allies_of(hid):
-		if o == pid():
-			continue   # the player decides their own spending
-		var oh := house(o)
-		if oh["gold"] < float(share) + AiPlayer.WORKING_CAPITAL:
-			continue
-		oh["gold"] -= share
-		oh["month_out"] += share
-		house(hid)["gold"] += share
-		house(hid)["month_in"] += share
+	for o in _allies_pay(hid, share):
 		if hid == pid():
 			_say("%s送来 %s 金，助你建灯塔。" % [GameData.HOUSES[o]["leader"], UiKit.money(share)], "good")
 		else:
 			_say("%s出了 %s 金，帮盟友%s建灯塔。" % [GameData.HOUSES[o]["name"], UiKit.money(share), GameData.HOUSES[hid]["name"]], "rival")
+
+
+## A house in a debt crisis is bailed out by an AI ally, or asks the player (round 27).
+func _ally_bail(hid: String) -> void:
+	var h := house(hid)
+	var need := int(-h["gold"]) + 2000
+	for o in allies_of(hid):
+		if o == pid():
+			continue
+		var oh := house(o)
+		if oh["gold"] >= float(need) + AiPlayer.WORKING_CAPITAL:
+			oh["gold"] -= need
+			oh["month_out"] += need
+			h["gold"] += need
+			h["month_in"] += need
+			add_tie(hid, o, GameData.BAIL_TIE)
+			_say("%s替盟友%s还了 %s 金的债。" % [GameData.HOUSES[o]["name"], GameData.HOUSES[hid]["name"], UiKit.money(need)], "rival")
+			return
+	if tie_state(hid) == "ally" and s["event"] == null and float(need) <= house()["gold"] * GameData.BAIL_MAX:
+		EventBook.open_bail(self, hid, need)
+
+
+# ================================================================ borrowed ships (round 27)
+
+## An ally's ships docked at this port that could be lent: empty, and never their last one.
+func loan_candidates(hid: String, port: String) -> Array:
+	var mine := _ships_of(hid)
+	if mine.size() < 2:
+		return []
+	return mine.filter(func(x): return docked(x) and x["port"] == port and x["cargo"].is_empty())
+
+
+func loan_rent(sh: Dictionary) -> int:
+	return maxi(500, int(float(GameData.SHIPS[sh["type"]]["price"]) * GameData.LOAN_RENT) / 100 * 100)
+
+
+## Borrow an ally's docked ship for LOAN_DAYS: it joins the fleet, sails and fights as yours.
+func borrow_ship(hid: String, ship_id: int) -> Dictionary:
+	var sh := ship(ship_id)
+	var fl := flagship()
+	if sh.is_empty() or sh["owner"] != hid or tie_state(hid) != "ally":
+		return _fail("只有盟友才肯把船借给你。")
+	if fl.is_empty() or not docked(fl) or not docked(sh) or sh["port"] != fl["port"]:
+		return _fail("这艘船要和旗舰停在同一座港口。")
+	if not sh["cargo"].is_empty() or _ships_of(hid).size() < 2:
+		return _fail("%s现在腾不出这艘船。" % GameData.HOUSES[hid]["leader"])
+	if fleet_ships(fl).size() >= GameData.FLEET_MAX:
+		return _fail("一支船队最多 %d 艘。" % GameData.FLEET_MAX)
+	var rent := loan_rent(sh)
+	var h := house()
+	if h["gold"] < rent:
+		return _fail("租金需要 %d 金。" % rent)
+	h["gold"] -= rent
+	h["month_out"] += rent
+	house(hid)["gold"] += rent
+	house(hid)["month_in"] += rent
+	sh["owner"] = pid()
+	sh["loan"] = {"hid": hid, "until": int(s["day"]) + GameData.LOAN_DAYS}
+	sh["fleet"] = int(fl["id"])
+	sh["slot"] = "rear"
+	sh["route"] = null
+	sh["flagship"] = false
+	sh.erase("idle_until")
+	s["stats"]["loans"] = int(s["stats"].get("loans", 0)) + 1
+	return {"ok": true, "msg": "%s 编入你的船队 %d 天，租金 %s 金。到期它停在哪座港就从哪座港回去，船上的货按市价变卖。" % [sh["name"], GameData.LOAN_DAYS, UiKit.money(rent)]}
+
+
+## Borrowed ships go home when their time is up, when the alliance ends, and stay for good
+## when the lender goes under.
+func _tick_loans() -> void:
+	for sh in _ships_of(pid()):
+		if not sh.has("loan"):
+			continue
+		var lender: String = sh["loan"]["hid"]
+		if house(lender)["bankrupt"]:
+			sh.erase("loan")
+			_say("%s没了主人，%s 从此留在你的船队。" % [GameData.HOUSES[lender]["name"], sh["name"]], "good")
+			continue
+		if docked(sh) and (int(s["day"]) >= int(sh["loan"]["until"]) or tie_state(lender) != "ally"):
+			_return_loan(sh)
+
+
+func _return_loan(sh: Dictionary) -> void:
+	var lender: String = sh["loan"]["hid"]
+	var fl := flagship()
+	var sold := 0
+	for g in sh["cargo"].keys():
+		var qty := int(sh["cargo"][g]["qty"])
+		var unit := float(sh["cargo"][g]["cost"])
+		var r := sell(int(sh["id"]), g, qty)
+		if r["ok"]:
+			sold += int(r["revenue"])
+		elif not fl.is_empty() and docked(fl) and fl["port"] == sh["port"]:
+			sh["cargo"].erase(g)
+			_stow(fl, g, qty, unit)
+	sh["cargo"] = {}
+	sh["owner"] = lender
+	sh["fleet"] = 0
+	sh["slot"] = "main"
+	sh["route"] = null
+	sh["flagship"] = false
+	sh.erase("loan")
+	_say("%s 到期还给了%s%s。" % [sh["name"], GameData.HOUSES[lender]["name"], ("，船上的货变卖得 %s 金" % UiKit.money(sold)) if sold > 0 else ""], "info")
+
+
+## A borrowed ship lost in battle: the lender is paid half its price and does not forget.
+func _loan_lost(sh: Dictionary) -> void:
+	var lender: String = sh["loan"]["hid"]
+	var comp := int(float(GameData.SHIPS[sh["type"]]["price"]) * GameData.LOAN_LOST)
+	var h := house()
+	h["gold"] -= comp
+	h["month_out"] += comp
+	house(lender)["gold"] += comp
+	house(lender)["month_in"] += comp
+	add_tie(pid(), lender, -GameData.LOAN_LOST_TIE)
+	_say("借来的 %s 没了。你赔给%s %s 金，%s没再提这件事，但两家的关系冷了。" % [sh["name"], GameData.HOUSES[lender]["name"], UiKit.money(comp), GameData.HOUSES[lender]["leader"]], "bad")
 
 
 ## Monthly drift of the relationships: old feelings fade, the two houses trailing the richest draw
@@ -2945,6 +3081,8 @@ func _tick_crisis() -> void:
 		if h["gold"] < 0.0:
 			if h["crisis"] == 0 and hid == pid():
 				_say("债务危机：%d 天内金币必须转正，否则商会破产！" % GameData.CRISIS_DAYS, "bad")
+			elif h["crisis"] == 0:
+				_ally_bail(hid)
 			h["crisis"] += 1
 			if h["crisis"] >= GameData.CRISIS_DAYS:
 				_bankrupt(hid)
@@ -3040,6 +3178,8 @@ func from_json(text: String) -> bool:
 			sh[k] = int(sh[k])
 		for g in sh["cargo"]:
 			sh["cargo"][g]["qty"] = int(sh["cargo"][g]["qty"])
+		if sh.has("loan"):
+			sh["loan"]["until"] = int(sh["loan"]["until"])
 		if not sh.has("mods"):
 			sh["mods"] = {"hull": 0, "sail": 0, "hold": 0, "guns": 0}
 		for k in sh["mods"]:

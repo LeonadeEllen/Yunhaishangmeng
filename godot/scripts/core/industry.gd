@@ -297,6 +297,8 @@ static func buyout(sim: Sim, pid: String, i: int, hid: String = "") -> Dictionar
 	var before := sim.patron(pid)
 	h["gold"] -= cost
 	h["month_out"] += cost
+	# allies chip in on a buyout against a third house (round 27)
+	var shares: Dictionary = sim._allies_pay(hid, int(float(cost) * GameData.ALLY_BUYOUT_SHARE), target)
 	var comp := float(GameData.build_cost(pl["b"])) * float(pl["lvl"])
 	sim.house(target)["gold"] += comp
 	sim.house(target)["month_in"] += comp
@@ -311,6 +313,8 @@ static func buyout(sim: Sim, pid: String, i: int, hid: String = "") -> Dictionar
 	var msg := "%s 收购了 %s 在 %s 的%s工坊。" % [who, GameData.HOUSES[target]["name"], GameData.port_name(pid), GameData.good_name(pl["b"])]
 	if sim.patron(pid) != before and sim.patron(pid) == hid:
 		msg += " %s 成为 %s 港主。" % [who, GameData.port_name(pid)]
+	for o in shares:
+		msg += " 盟友%s出了 %s 金。" % [GameData.HOUSES[o]["name"], UiKit.money(int(shares[o]))]
 	sim._say(msg, "good" if mine else ("bad" if target == sim.pid() else "major"))
 	return {"ok": true, "msg": msg}
 
