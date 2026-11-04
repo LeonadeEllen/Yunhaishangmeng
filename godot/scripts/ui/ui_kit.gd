@@ -27,6 +27,16 @@ static func sprite(atlas: String, idx: int) -> Texture2D:
 	return tex("res://assets/art/%s/%02d.webp" % [atlas, idx])
 
 
+## A character's bust portrait (finish plan, phase C): hero_<house>, a companion id or shop_<kind>.
+## mood "happy" / "upset" falls back to the calm face when that file is missing.
+static func portrait(id: String, mood: String = "") -> Texture2D:
+	if mood != "":
+		var pm := "res://assets/art/portraits/%s_%s.webp" % [id, mood]
+		if ResourceLoader.exists(pm):
+			return tex(pm)
+	return tex("res://assets/art/portraits/%s.webp" % id)
+
+
 static func scene_art(id: String) -> Texture2D:
 	if "/" in id:
 		return tex("res://assets/art/%s.webp" % id)

@@ -92,6 +92,8 @@ func _ready() -> void:
 	_show_title()
 	if OS.get_environment("YUNHAI_SHOTS") != "":
 		load("res://tests/shot_runner.gd").new().run(self)
+	elif OS.get_environment("YUNHAI_TOWNSHOTS") != "":
+		load("res://tests/town_shots.gd").new().run(self)
 
 
 ## Tutorial highlight: brass outline + gentle pulse on the exact button to press.
@@ -189,7 +191,7 @@ func _pick_house() -> void:
 		cv.add_theme_constant_override("separation", 6)
 		card.add_child(cv)
 		var top := HBoxContainer.new()
-		top.add_child(UiKit.icon(UiKit.sprite("leaders", d["portrait"]), 96))
+		top.add_child(UiKit.icon(UiKit.portrait("hero_" + hid), 96))
 		var tv := VBoxContainer.new()
 		tv.add_theme_constant_override("separation", 2)
 		var nm := HBoxContainer.new()
@@ -1173,10 +1175,10 @@ func _interior_strip(kind: String) -> Control:
 	var hb := HBoxContainer.new()
 	hb.add_theme_constant_override("separation", 10)
 	box.add_child(hb)
-	var pidx: int = town.npc_portrait(kind)
-	if pidx < 0:
-		pidx = GameData.HOUSES[sim.pid()]["portrait"]
-	hb.add_child(UiKit.icon(UiKit.sprite("leaders", pidx), 72))
+	var pid_face: String = town.npc_portrait(kind)
+	if pid_face == "":
+		pid_face = "hero_" + sim.pid()
+	hb.add_child(UiKit.icon(UiKit.portrait(pid_face, "happy" if kind == "tavern" else ""), 72))
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 2)
 	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1247,7 +1249,7 @@ func _show_hero() -> void:
 		grid.add_child(b)
 	var top := HBoxContainer.new()
 	top.add_theme_constant_override("separation", 12)
-	top.add_child(UiKit.icon(UiKit.sprite("leaders", d["portrait"]), 110))
+	top.add_child(UiKit.icon(UiKit.portrait("hero_" + sim.pid()), 110))
 	var tv := VBoxContainer.new()
 	tv.add_theme_constant_override("separation", 4)
 	tv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1854,7 +1856,7 @@ func _tab_tavern() -> void:
 			var qp := PanelContainer.new()
 			qp.add_theme_stylebox_override("panel", UiKit.box(Color("f6ecd2"), UiKit.BRASS, 5, 1, 6))
 			var qrow := HBoxContainer.new()
-			qrow.add_child(UiKit.icon(UiKit.sprite("leaders", Characters.PORTRAITS[qcid]), 34))
+			qrow.add_child(UiKit.icon(UiKit.portrait(qcid), 34))
 			var qv := VBoxContainer.new()
 			qv.add_theme_constant_override("separation", 0)
 			qv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -2099,7 +2101,7 @@ func _toast(text: String, kind: String = "info") -> void:
 
 # =================================================================== dialogs
 
-func _modal(title: String, art: String, lines: Array, buttons: Array, width: int = 640) -> VBoxContainer:
+func _modal(title: String, art: String, lines: Array, buttons: Array, width: int = 640, faces: Array = []) -> VBoxContainer:
 	_close_modal()
 	_modal_open = true
 	modal_layer.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -2125,9 +2127,27 @@ func _modal(title: String, art: String, lines: Array, buttons: Array, width: int
 		img.custom_minimum_size = Vector2(width, 240)
 		img.clip_contents = true
 		v.add_child(img)
-	v.add_child(UiKit.label(title, 26, UiKit.INK, true))
+	var text_box: VBoxContainer = v
+	if not faces.is_empty():
+		# who is speaking: their portraits beside the text (finish plan, phase C)
+		var fh := HBoxContainer.new()
+		fh.add_theme_constant_override("separation", 14)
+		var fv := VBoxContainer.new()
+		fv.add_theme_constant_override("separation", 6)
+		for f in faces:
+			var fr := PanelContainer.new()
+			fr.add_theme_stylebox_override("panel", UiKit.box(Color("fbf5e6"), UiKit.BRASS, 6, 2, 2))
+			fr.add_child(UiKit.icon(UiKit.portrait(f[0], f[1]), 112 if faces.size() == 1 else 84))
+			fv.add_child(fr)
+		fh.add_child(fv)
+		text_box = VBoxContainer.new()
+		text_box.add_theme_constant_override("separation", 10)
+		text_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		fh.add_child(text_box)
+		v.add_child(fh)
+	text_box.add_child(UiKit.label(title, 26, UiKit.INK, true))
 	for line in lines:
-		v.add_child(UiKit.para(line, 17))
+		text_box.add_child(UiKit.para(line, 17))
 	var row: Container
 	if buttons.size() > 3:
 		# many choices wrap onto a second line instead of squeezing past the screen edge
@@ -2168,7 +2188,29 @@ func _show_event() -> void:
 	var btns := []
 	for i in ev["choices"].size():
 		btns.append([ev["choices"][i]["label"], _choose_event.bind(i), i > 0])
-	_modal(ev["title"], ev["art"] if ev["art"] != "" else "explore_scene", [ev["text"]], btns)
+	_modal(ev["title"], ev["art"] if ev["art"] != "" else "explore_scene", [ev["text"]], btns, 640, _event_faces(eid))
+
+
+## Portraits for the people in an event: [[portrait id, mood], ...].
+func _event_faces(eid: String) -> Array:
+	var parts := eid.split(":")
+	match parts[0]:
+		"char":
+			return [[parts[1], ""]]
+		"quest":
+			return [[Characters.quest_cid(eid.substr(6)), ""]]
+		"pair":
+			var pr: Dictionary = Characters.PAIRS[int(parts[1])]
+			return [[pr["a"], ""], [pr["b"], ""]]
+		"trio":
+			return Characters.TRIOS[int(parts[1])]["who"].map(func(c): return [c, ""])
+		"rival":
+			return [["hero_" + parts[1], ""]]
+		"bail", "farewell":
+			return [["hero_" + parts[1], "upset"]]
+	if eid.begins_with("story_"):
+		return [["luqing", "upset" if eid == "story_1" else ""]]
+	return []
 
 
 func _choose_event(idx: int) -> void:
@@ -2202,7 +2244,7 @@ func _char_card(cid: String, where: String) -> Control:
 	var hb := HBoxContainer.new()
 	hb.add_theme_constant_override("separation", 10)
 	box.add_child(hb)
-	hb.add_child(UiKit.icon(UiKit.sprite("leaders", Characters.PORTRAITS[cid]), 64))
+	hb.add_child(UiKit.icon(UiKit.portrait(cid), 64))
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 1)
 	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -2242,7 +2284,7 @@ func _show_crew() -> void:
 		var hb := HBoxContainer.new()
 		hb.add_theme_constant_override("separation", 10)
 		box.add_child(hb)
-		hb.add_child(UiKit.icon(UiKit.sprite("leaders", Characters.PORTRAITS[cid]), 60))
+		hb.add_child(UiKit.icon(UiKit.portrait(cid, "happy" if int(sim.crew()[cid]["aff"]) >= 60 else ""), 60))
 		var col := VBoxContainer.new()
 		col.add_theme_constant_override("separation", 1)
 		col.size_flags_horizontal = Control.SIZE_EXPAND_FILL

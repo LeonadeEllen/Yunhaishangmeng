@@ -20,6 +20,11 @@ var _paper: Texture2D
 var region := 1               # 1 = the western charts, 2 = the eastern fog
 var _vx := 200.0              # current view x (animates between the two regions)
 var _fog := []                # paper fog over the eastern sea
+var _islets := []             # small floating rocks between the ports (finish plan, phase D)
+var _currents := []           # cloud currents: streamlines drawn as drifting dashes
+var _whales := []             # cloud whales swimming slow loops
+var _lanes := []              # faint trade lanes between neighbouring ports
+const STORMS := [Vector2(590, 700), Vector2(1110, 70), Vector2(1520, 880), Vector2(2280, 980), Vector2(2600, 470)]
 
 
 func _ready() -> void:
@@ -38,6 +43,45 @@ func _ready() -> void:
 				"r": fr.randf_range(110, 210), "a": fr.randf_range(0.8, 0.98), "ph": fr.randf_range(0, TAU)})
 	for pid in GameData.PORT_IDS:
 		_island_tex[pid] = UiKit.sprite("map_islands", GameData.PORTS[pid]["island"])
+	# scenery between the ports
+	var dr := RandomNumberGenerator.new()
+	dr.seed = 9090
+	var tries := 0
+	while _islets.size() < 70 and tries < 2000:
+		tries += 1
+		var ip := Vector2(dr.randf_range(140, 2960), dr.randf_range(-20, 1080))
+		var ok := true
+		for pid in GameData.PORT_IDS:
+			if ip.distance_to(GameData.PORTS[pid]["pos"]) < 125:
+				ok = false
+		for sid in GameData.SPOT_IDS:
+			if ip.distance_to(GameData.pos_of(sid)) < 70:
+				ok = false
+		for st in STORMS:
+			if ip.distance_to(st) < 120:
+				ok = false
+		if ok:
+			_islets.append({"p": ip, "r": dr.randf_range(10, 22), "k": dr.randi_range(0, 3), "ph": dr.randf() * TAU})
+	for i in 14:
+		var start := Vector2(dr.randf_range(100, 2800), dr.randf_range(40, 1040))
+		var pts := PackedVector2Array()
+		var amp := dr.randf_range(18, 46)
+		var freq := dr.randf_range(0.004, 0.009)
+		var len := dr.randf_range(380, 760)
+		var x := 0.0
+		while x < len:
+			pts.append(start + Vector2(x, sin(x * freq + i) * amp))
+			x += 18.0
+		_currents.append({"pts": pts, "ph": dr.randf() * 10.0, "dir": 1.0 if i % 3 != 0 else -1.0})
+	_whales = [{"c": Vector2(1040, 430), "rx": 190.0, "ry": 70.0, "sp": 0.05, "ph": 0.0, "s": 1.0},
+		{"c": Vector2(640, 860), "rx": 160.0, "ry": 50.0, "sp": -0.04, "ph": 2.0, "s": 0.8},
+		{"c": Vector2(2380, 650), "rx": 220.0, "ry": 90.0, "sp": 0.035, "ph": 4.0, "s": 1.2}]
+	for i in GameData.PORT_IDS.size():
+		for j in range(i + 1, GameData.PORT_IDS.size()):
+			var a: Vector2 = GameData.PORTS[GameData.PORT_IDS[i]]["pos"]
+			var b: Vector2 = GameData.PORTS[GameData.PORT_IDS[j]]["pos"]
+			if a.distance_to(b) < 470:
+				_lanes.append([GameData.PORT_IDS[i], GameData.PORT_IDS[j]])
 	for t in GameData.SHIPS:
 		_ship_tex[t] = UiKit.sprite("ships", GameData.SHIPS[t]["sprite"])
 
@@ -128,12 +172,24 @@ func _draw() -> void:
 	for i in 6:
 		var inset := float(i) * 18.0
 		draw_rect(Rect2(Vector2(inset, inset), size - Vector2(inset, inset) * 2.0), Color(0.86, 0.91, 0.91, 0.08), false, 18.0)
+	# the cloud sea deepens towards the bottom of the chart
+	for i in 10:
+		draw_rect(Rect2(0, size.y * (0.5 + i * 0.05), size.x, size.y * 0.05 + 1), Color(0.45, 0.6, 0.7, 0.012 * i))
+	_draw_currents(sc)
 	# far clouds
 	for c in _clouds:
 		if c["r"] > 90:
 			_cloud(c, sc)
 	if sim == null:
 		return
+	_draw_whales(sc)
+	_draw_islets(sc)
+	_draw_storms(sc)
+	# well-worn trade lanes between neighbouring ports
+	var open0: Array = sim.open_ports()
+	for ln in _lanes:
+		if open0.has(ln[0]) and open0.has(ln[1]):
+			_dotted(to_screen(GameData.PORTS[ln[0]]["pos"]), to_screen(GameData.PORTS[ln[1]]["pos"]), Color(UiKit.INK, 0.13), 1.6 * maxf(sc, 0.7))
 	# routes of player ships
 	var fl := sim.flagship()
 	for sh in sim.ships_of(sim.pid()):
@@ -164,6 +220,11 @@ func _draw() -> void:
 			draw_circle(p + Vector2(0, bob), w * (0.58 + 0.06 * pulse), Color(UiKit.BRASS, 0.25 + 0.2 * pulse))
 		if pid == selected_port or pid == hover_port:
 			draw_circle(p + Vector2(0, bob), w * 0.55, Color(1, 1, 1, 0.35))
+		# the island's shadow on the clouds below, swaying opposite to the bob
+		draw_set_transform(p + Vector2(w * 0.08, h * 0.62 - bob * 0.5), 0.0, Vector2(1.0, 0.26))
+		draw_circle(Vector2.ZERO, w * 0.36, Color(0.15, 0.25, 0.3, 0.13))
+		draw_circle(Vector2.ZERO, w * 0.24, Color(0.15, 0.25, 0.3, 0.1))
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		draw_texture_rect(tex, Rect2(p - Vector2(w, h) * 0.5 + Vector2(0, bob), Vector2(w, h)), false)
 	_draw_fog(sc, font)
 	# ships
@@ -179,16 +240,44 @@ func _draw() -> void:
 			off = Vector2(ISLAND_W * 0.62 * (1 if idx % 2 == 0 else -1), -10.0 + 34.0 * (idx / 2)) * sc
 		var bob2 := sin(_t * 2.0 + float(sh["id"])) * 2.5 * sc
 		var r2 := Rect2(sp + off - Vector2(w2, h2) * 0.5 + Vector2(0, bob2 - 18.0 * sc), Vector2(w2, h2))
+		var flip := false
+		if not sim.docked(sh) and GameData.PORTS.has(sh["from"]) and GameData.PORTS.has(sh["to"]):
+			var heading: Vector2 = (GameData.PORTS[sh["to"]]["pos"] - GameData.PORTS[sh["from"]]["pos"]).normalized()
+			flip = heading.x < -0.05
+			# a wake of little cloud puffs behind the ship
+			for k in 7:
+				var age := fmod(_t * 0.9 + float(k) / 7.0, 1.0)
+				var wp := r2.get_center() + Vector2(0, h2 * 0.25) - heading * (w2 * 0.35 + age * 70.0 * sc) + Vector2(0, sin(_t * 3.0 + k) * 2.0)
+				draw_circle(wp, (3.0 + age * 9.0) * maxf(sc, 0.7), Color(1, 1, 1, (1.0 - age) * 0.55))
 		draw_set_transform(r2.get_center() + Vector2(0, h2 * 0.75), 0.0, Vector2(1.0, 0.28))
 		draw_circle(Vector2.ZERO, w2 * 0.4, Color(0.1, 0.2, 0.25, 0.16))
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		var ship_rect := r2
+		if flip:
+			draw_set_transform(r2.get_center(), 0.0, Vector2(-1, 1))
+			ship_rect = Rect2(-r2.size * 0.5, r2.size)
 		if sh["owner"] != sim.pid():
-			draw_texture_rect(tex2, r2, false, Color(0.82, 0.86, 0.92, 0.95))
+			draw_texture_rect(tex2, ship_rect, false, Color(0.82, 0.86, 0.92, 0.95))
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 			draw_circle(r2.position + Vector2(r2.size.x * 0.5, -3), 4.5 * maxf(sc, 0.8), GameData.HOUSES[sh["owner"]]["color"])
 		else:
 			if sh.get("flagship", false):
+				draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 				draw_circle(r2.get_center(), w2 * 0.62, Color(UiKit.BRASS, 0.22))
-			draw_texture_rect(tex2, r2, false)
+				if flip:
+					draw_set_transform(r2.get_center(), 0.0, Vector2(-1, 1))
+			draw_texture_rect(tex2, ship_rect, false)
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	# dusk and night over the chart: the ports light their lamps
+	var night := _night()
+	if night > 0.01:
+		draw_rect(Rect2(Vector2.ZERO, size), Color(0.05, 0.09, 0.22, night * 0.8))
+		for pid in open:
+			var lp2 := to_screen(GameData.PORTS[pid]["pos"])
+			draw_circle(lp2, ISLAND_W * sc * 0.45, Color(1.0, 0.78, 0.4, night * 0.28))
+			for k in 5:
+				var a := float(k) * 1.3 + float(pid.hash() % 7)
+				draw_circle(lp2 + Vector2(cos(a), sin(a) * 0.5) * ISLAND_W * sc * 0.22, 2.2 * maxf(sc, 0.8), Color(1.0, 0.86, 0.5, night * (1.6 + 0.4 * sin(_t * 3.0 + k))))
 	# seasonal wind rose (bottom right of the map)
 	var day: int = sim.s["day"]
 	var wv: Vector2 = GameData.WIND[(day % GameData.DAYS_YEAR) / 90]
@@ -251,6 +340,116 @@ func _draw() -> void:
 	for c in _clouds:
 		if c["r"] <= 90:
 			_cloud(c, sc)
+	# brass corner ornaments: this is a chart on the captain's table
+	for corner: Vector2 in [Vector2(0, 0), Vector2(1, 0), Vector2(0, 1), Vector2(1, 1)]:
+		var cp2 := Vector2(corner.x * size.x, corner.y * size.y) + Vector2(14 - corner.x * 28, 14 - corner.y * 28)
+		var dx := 1.0 - corner.x * 2.0
+		var dy := 1.0 - corner.y * 2.0
+		draw_polyline(PackedVector2Array([cp2 + Vector2(0, 46 * dy), cp2, cp2 + Vector2(46 * dx, 0)]), Color(UiKit.BRASS, 0.75), 3.0)
+		draw_polyline(PackedVector2Array([cp2 + Vector2(6 * dx, 30 * dy), cp2 + Vector2(6 * dx, 6 * dy), cp2 + Vector2(30 * dx, 6 * dy)]), Color(UiKit.BRASS, 0.5), 1.5)
+		draw_circle(cp2 + Vector2(6 * dx, 6 * dy), 3.0, Color(UiKit.BRASS, 0.8))
+
+
+func _night() -> float:
+	var tod := fposmod((float(sim.s["day"]) + float(sim.s.get("frac", 0.0))) * 0.37, 1.0)
+	return clampf(absf(tod - 0.5) * 2.6 - 0.75, 0.0, 0.45)
+
+
+## Streamlines of the cloud currents: dashes drift along them.
+func _draw_currents(sc: float) -> void:
+	for cur in _currents:
+		var pts: PackedVector2Array = cur["pts"]
+		var dir: float = cur["dir"]
+		for i in range(0, pts.size() - 1):
+			var phase := fmod(_t * 0.6 * dir + float(cur["ph"]) + i * 0.17, 1.0)
+			if phase < 0.0:
+				phase += 1.0
+			if phase < 0.45:
+				var a := to_screen(pts[i])
+				var b := to_screen(pts[i + 1])
+				draw_line(a, b, Color(1, 1, 1, 0.6 * (1.0 - absf(phase - 0.22) * 4.0)), 2.6 * maxf(sc, 0.7), true)
+		# an arrowhead at the downstream end
+		var e := to_screen(pts[pts.size() - 1] if dir > 0 else pts[0])
+		var d2 := (to_screen(pts[pts.size() - 1]) - to_screen(pts[pts.size() - 2])).normalized() * dir
+		draw_line(e, e - d2.rotated(0.5) * 9.0, Color(1, 1, 1, 0.35), 2.0, true)
+		draw_line(e, e - d2.rotated(-0.5) * 9.0, Color(1, 1, 1, 0.35), 2.0, true)
+
+
+func _draw_islets(sc: float) -> void:
+	for it in _islets:
+		var p := to_screen(it["p"]) + Vector2(0, sin(_t * 0.7 + float(it["ph"])) * 2.0 * sc)
+		var r: float = float(it["r"]) * maxf(sc, 0.6)
+		if p.x < -40 or p.x > size.x + 40:
+			continue
+		draw_set_transform(p + Vector2(0, r * 1.6), 0.0, Vector2(1.0, 0.3))
+		draw_circle(Vector2.ZERO, r, Color(0.15, 0.25, 0.3, 0.1))
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		var rock := Color("8d7b68").lerp(Color("a07a5a"), float(int(it["k"]) % 2) * 0.5)
+		draw_colored_polygon(PackedVector2Array([p + Vector2(-r, 0), p + Vector2(r, 0), p + Vector2(r * 0.3, r * 1.3), p + Vector2(-r * 0.2, r * 1.0)]), rock)
+		draw_colored_polygon(PackedVector2Array([p + Vector2(-r * 1.05, 1), p + Vector2(r * 1.05, 1), p + Vector2(r * 0.8, -r * 0.35), p + Vector2(-r * 0.7, -r * 0.4)]), Color("8fae7a") if int(it["k"]) != 3 else Color("d8d8d0"))
+		if int(it["k"]) == 1:
+			draw_line(p + Vector2(r * 0.2, -r * 0.3), p + Vector2(r * 0.2, -r * 1.2), Color("6a4a30"), 1.4)
+			draw_circle(p + Vector2(r * 0.2, -r * 1.3), r * 0.45, Color("6f9450"))
+		elif int(it["k"]) == 2 and r > 12:
+			# an old ruined tower
+			draw_rect(Rect2(p + Vector2(-r * 0.25, -r * 1.3), Vector2(r * 0.5, r * 1.0)), Color("b9b0a0"))
+			draw_rect(Rect2(p + Vector2(-r * 0.32, -r * 1.42), Vector2(r * 0.64, r * 0.2)), Color("a09888"))
+
+
+func _draw_storms(sc: float) -> void:
+	for st in STORMS:
+		var p := to_screen(st)
+		if p.x < -200 or p.x > size.x + 200:
+			continue
+		var r := 70.0 * sc
+		for k in 6:
+			var a := float(k) / 6.0 * TAU + _t * 0.08
+			var cp := p + Vector2(cos(a) * r * 0.7, sin(a) * r * 0.32)
+			draw_set_transform(cp, 0.0, Vector2(1.0, 0.55))
+			draw_circle(Vector2(0, 6), r * 0.55, Color(0.2, 0.24, 0.32, 0.25))
+			draw_circle(Vector2.ZERO, r * 0.5, Color(0.42, 0.46, 0.55, 0.55))
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		draw_set_transform(p, 0.0, Vector2(1.0, 0.55))
+		draw_circle(Vector2.ZERO, r * 0.6, Color(0.3, 0.33, 0.42, 0.7))
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		# lightning now and then
+		var flash := fmod(_t * 0.7 + st.x * 0.01, 3.0)
+		if flash < 0.12:
+			var bolt := PackedVector2Array([p + Vector2(-4, -6) * sc, p + Vector2(6, 10) * sc, p + Vector2(-2, 12) * sc, p + Vector2(8, 34) * sc])
+			draw_polyline(bolt, Color(1.0, 0.95, 0.6, 0.95), 3.0 * maxf(sc, 0.7), true)
+			draw_circle(p, r * 0.8, Color(1.0, 1.0, 0.85, 0.12))
+
+
+func _draw_whales(sc: float) -> void:
+	for wh in _whales:
+		var ang: float = _t * float(wh["sp"]) + float(wh["ph"])
+		var c: Vector2 = wh["c"]
+		var mp := c + Vector2(cos(ang) * float(wh["rx"]), sin(ang) * float(wh["ry"]))
+		var vel := Vector2(-sin(ang) * float(wh["rx"]), cos(ang) * float(wh["ry"])) * signf(float(wh["sp"]))
+		var p := to_screen(mp)
+		if p.x < -150 or p.x > size.x + 150:
+			continue
+		var s: float = float(wh["s"]) * sc
+		var face := -1.0 if vel.x < 0 else 1.0
+		var body := Color(0.55, 0.66, 0.74, 0.42)
+		draw_set_transform(p, 0.0, Vector2(face, 1.0))
+		draw_colored_polygon(PackedVector2Array([Vector2(46, 0) * s, Vector2(30, -14) * s, Vector2(-10, -16) * s, Vector2(-40, -6) * s, Vector2(-52, 0) * s, Vector2(-40, 6) * s, Vector2(-6, 14) * s, Vector2(32, 12) * s]), body)
+		var flap := sin(_t * 1.6) * 6.0
+		draw_colored_polygon(PackedVector2Array([Vector2(-48, 0) * s, Vector2(-70, -12 + flap) * s, Vector2(-62, 0) * s, Vector2(-70, 12 + flap) * s]), body)
+		draw_colored_polygon(PackedVector2Array([Vector2(0, 8) * s, Vector2(14, 22 + flap * 0.5) * s, Vector2(18, 10) * s]), body)
+		draw_circle(Vector2(30, -4) * s, 2.0 * s, Color(0.2, 0.25, 0.3, 0.5))
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+func _dotted(a: Vector2, b: Vector2, col: Color, w: float) -> void:
+	var d := a.distance_to(b)
+	if d < 1.0:
+		return
+	var dir := (b - a) / d
+	var x := 6.0
+	while x < d - 6.0:
+		draw_circle(a + dir * x, w, col)
+		x += 11.0
 
 
 ## The eastern sea: dense paper fog that thins around what the player has found, and the
