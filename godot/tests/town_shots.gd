@@ -17,7 +17,7 @@ func run(m: Control) -> void:
 	await _wait(0.3)
 	main._close_modal()
 	var sim: Sim = main.sim
-	sim.s["story"] = 3
+	sim.s["story"] = 5
 	var ports := OS.get_environment("PORTS").split(",") if OS.get_environment("PORTS") != "" else PackedStringArray(["qianqi", "muxia", "fengyue", "xiajing"])
 	var k := 0
 	for pid in ports:

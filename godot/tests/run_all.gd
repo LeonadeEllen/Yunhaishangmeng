@@ -578,7 +578,7 @@ func test_rivals_and_hq() -> void:
 	check(int(sim.house()["rep"]) != 500, "the debate changes reputation (%d)" % int(sim.house()["rep"]))
 	# meetings trigger on arrival when a rival ship is docked here, not too often
 	var met := 0
-	sim.s["story"] = 3   # keep the main story from pre-empting the quay
+	sim.s["story"] = 5   # keep the main story from pre-empting the quay
 	for k in 40:
 		sim.s["day"] = 200 + k * 60
 		sim.s["event"] = null
@@ -726,7 +726,7 @@ func test_festival() -> void:
 	sim.fund_work("muxia", "dock")
 	sim.s["day"] = GameData.DAYS_YEAR * 2 - 1
 	sim.s["festival_show"] = null
-	sim.s["story"] = 3   # the main story would otherwise block the day
+	sim.s["story"] = 5   # the main story would otherwise block the day
 	sim.s["event"] = null
 	sim.advance_day()
 	var works_winner := ""
@@ -921,7 +921,7 @@ func test_quests() -> void:
 	sim.house()["gold"] = 80000.0
 	sim.house()["rep"] = 3600
 	sim.s["stats"]["wins"] = 1
-	sim.s["story"] = 3
+	sim.s["story"] = 5
 	check(sim.recruit("aman", "qianqi", "tavern")["ok"], "阿蛮 joins")
 	sim.crew()["aman"]["aff"] = Characters.QUEST_AFF
 	sim.crew()["aman"]["chapter"] = 2   # the next chapter needs 100, so the errand comes first
@@ -1045,7 +1045,7 @@ func test_festival_challenge() -> void:
 	print("a rival's challenge at the lantern festival")
 	var sim := Sim.new()
 	sim.new_game(18)
-	sim.s["story"] = 3
+	sim.s["story"] = 5
 	sim.house()["gold"] = 50000.0
 	var got := 0
 	var declined := false
@@ -1088,7 +1088,7 @@ func test_leaders() -> void:
 	print("rival leaders speak at the review and say goodbye when they go under")
 	var sim := Sim.new()
 	sim.new_game(24)
-	sim.s["story"] = 3
+	sim.s["story"] = 5
 	sim.s["day"] = GameData.DAYS_YEAR - 1
 	sim.s["event"] = null
 	sim.advance_day()
@@ -1119,7 +1119,7 @@ func test_ties() -> void:
 	print("alliances and feuds between the houses (round 26)")
 	var sim := Sim.new()
 	sim.new_game(26)
-	sim.s["story"] = 3
+	sim.s["story"] = 5
 	sim.s["day"] = 1
 	var me := sim.pid()
 	check(sim.tie("iron") == 0 and sim.tie_state("iron") == "plain" and sim.tie_name("iron") == "平常", "a new game starts with every pair at 0")
@@ -1216,7 +1216,7 @@ func test_ties() -> void:
 	# two rivals: an ally pays a share of a lighthouse stage; feuding houses trip each other up
 	var sim2 := Sim.new()
 	sim2.new_game(26)
-	sim2.s["story"] = 3
+	sim2.s["story"] = 5
 	sim2.s["day"] = 1
 	sim2.set_tie("iron", "tower", 50)
 	check(sim2.tie_state("iron", "tower") == "ally" and str(sim2.s["log"][-1][1]).contains("结了盟"), "two rivals can ally, and the news says so")
@@ -1268,7 +1268,7 @@ func test_ties() -> void:
 	# round 30: a rival captain who loaded here and cast off this morning can still be met on the quay
 	var sim5 := Sim.new()
 	sim5.new_game(30)
-	sim5.s["story"] = 3
+	sim5.s["story"] = 5
 	var rs: Dictionary = sim5.ships_of("iron")[0]
 	var dest := "muxia"
 	rs["from"] = rs["port"]
@@ -1288,7 +1288,7 @@ func test_allies() -> void:
 	print("what an ally is good for: borrowed ships, joint buyouts, bail-outs (round 27)")
 	var sim := Sim.new()
 	sim.new_game(27)
-	sim.s["story"] = 3
+	sim.s["story"] = 5
 	sim.s["day"] = 1
 	var me := sim.pid()
 	var fl := sim.flagship()
@@ -1354,7 +1354,7 @@ func test_allies() -> void:
 	# bail-outs
 	var sim2 := Sim.new()
 	sim2.new_game(27)
-	sim2.s["story"] = 3
+	sim2.s["story"] = 5
 	sim2.s["day"] = 1
 	sim2.set_tie("iron", "tower", 50)
 	sim2.house("tower")["gold"] = 200000.0
@@ -1390,7 +1390,7 @@ func test_grand() -> void:
 	print("the grand works of the cloud sea (round 28)")
 	var sim := Sim.new()
 	sim.new_game(28)
-	sim.s["story"] = 3
+	sim.s["story"] = 5
 	sim.s["day"] = 1
 	var me := sim.pid()
 	sim.house()["gold"] = 5.0e6
@@ -1450,7 +1450,7 @@ func test_grand() -> void:
 	# a rich rival builds with money its lighthouse does not need
 	var sim2 := Sim.new()
 	sim2.new_game(28)
-	sim2.s["story"] = 3
+	sim2.s["story"] = 5
 	sim2.s["day"] = 1
 	sim2.house("iron")["lh"]["stage"] = 2
 	sim2.house("iron")["gold"] = 1.6e6

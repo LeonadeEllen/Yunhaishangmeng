@@ -18,11 +18,24 @@ const STORY := [
 		{"label": "出 1,500 金替她赎回航图", "effects": {"gold": -1500, "story": 2, "intel": true, "say": "航图到手：你得知了全部港口的行情走向。"}},
 		{"label": "只抄下账本里的行情", "effects": {"story": 2, "intel": true, "say": "账本上的价格虽旧，却足够你规划下一程。"}},
 	 ]},
-	{"id": "story_3", "day": 420, "art": "story_loyalty", "title": "重逢与航图 · 终章",
+	{"id": "story_3", "day": 420, "art": "story_loyalty", "title": "重逢与航图 · 第三章",
 	 "text": "陆青带着自己的商会找到你：她愿意把父亲的老主顾全部介绍给你的商会，只求灯塔点亮时，第一束光照向风月坞。",
 	 "choices": [
 		{"label": "立约：灯塔为风月坞而亮", "effects": {"gold": 6000, "story": 3, "stock": ["fengyue", "steel", 60], "say": "风月坞的工匠们为你开了库房。"}},
 		{"label": "婉拒，各走各路", "effects": {"gold": 2000, "story": 3, "say": "陆青留下一笔谢礼，转身驶入云海。"}},
+	 ]},
+	# finish plan, phase F: the story follows the player into the east and ends at the lighthouse
+	{"id": "story_4", "day": 540, "need": "east", "art": "explore_scene", "title": "雾海旧灯 · 第四章",
+	 "text": "陆青在东云域的雾里找到一座熄了很多年的旧灯台，台基上刻着她父亲的名字。灯台底下压着一本航海日志，最后一页写着：「灯不能只为一家亮。」",
+	 "choices": [
+		{"label": "出资修好旧灯台（−4,000 金）", "effects": {"gold": -4000, "rep": 80, "story": 4, "say": "旧灯台重新亮起，东云域的船都看得见。陆青站在台上很久没有说话。"}},
+		{"label": "抄下日志，让旧灯台留在雾里", "effects": {"story": 4, "intel": true, "say": "日志里记着东边几条老航路的行情，你都抄了下来。"}},
+	 ]},
+	{"id": "story_5", "day": 600, "need": "lh3", "art": "story_loyalty", "title": "第一束光 · 终章",
+	 "text": "灯冠落成的那晚，陆青来到塔下。她把父亲的日志交给你：「他一辈子想看到的，就是这一束光。点灯的人该是你。」",
+	 "choices": [
+		{"label": "请陆青一起点灯", "effects": {"rep": 150, "story": 5, "say": "第一束光扫过云海，先照向风月坞，再照向每一座港。"}},
+		{"label": "按老规矩，由当家亲手点灯", "effects": {"gold": 5000, "rep": 100, "story": 5, "say": "灯亮了。各港商会送来贺礼，陆青在人群里朝你点了点头。"}},
 	 ]},
 ]
 
@@ -123,12 +136,22 @@ const EAST := [
 ]
 
 
+## Later chapters wait for the player to get there: the east charted, the lighthouse crowned.
+static func _story_ready(sim: Sim, ch: Dictionary) -> bool:
+	match str(ch.get("need", "")):
+		"east":
+			return sim.explore_open() and sim.s["explore"]["found"].size() >= 3
+		"lh3":
+			return int(sim.house()["lh"]["stage"]) >= 3
+	return true
+
+
 static func maybe_trigger(sim: Sim) -> void:
 	var s := sim.s
 	if s["event"] != null or s["over"] != null:
 		return
 	var story: int = int(s["story"])
-	if story < STORY.size() and int(s["day"]) >= int(STORY[story]["day"]):
+	if story < STORY.size() and int(s["day"]) >= int(STORY[story]["day"]) and _story_ready(sim, STORY[story]):
 		_open(sim, STORY[story])
 		return
 	if s.has("sailed"):

@@ -1,7 +1,9 @@
 extends Control
 ## Game shell: title screen, HUD, port panel, fleet list, dialogs, tutorial and the time loop.
 
-const SAVE_PATH := "user://save.json"
+const SAVE_PATH := "user://save.json"          # the monthly autosave
+const SLOT_FMT := "user://slot_%d.json"         # three hand-kept save slots (finish plan, phase E)
+const SETTINGS_PATH := "user://settings.cfg"
 const SPEEDS := [0, 1, 3, 8]          # days per second
 const MapView := preload("res://scripts/ui/map_view.gd")
 const TownView := preload("res://scripts/ui/town_view.gd")
@@ -45,6 +47,7 @@ var speed_btns := []
 var side: PanelContainer
 var side_body: VBoxContainer
 var fleet_box: VBoxContainer
+var fleet_panel: PanelContainer
 var toast_box: VBoxContainer
 var tut_panel: PanelContainer
 var tut_label: Label
@@ -59,6 +62,9 @@ var modal_layer: Control
 var hover_card: PanelContainer
 var _sfx := {}
 var _sfx_players := []
+var _music_kind := "sea"
+var _music_streams := {}
+var settings := {"music": 70, "sfx": 80, "fullscreen": false, "scale": 1.0}
 
 
 func _ready() -> void:
@@ -83,11 +89,15 @@ func _ready() -> void:
 	add_child(music)
 	_sfx_players.append(music)   # keeps it alive across screen changes
 	music.play()
+	AudioServer.add_bus()
+	AudioServer.set_bus_name(AudioServer.bus_count - 1, "Sfx")
 	for i in 4:
 		var ap := AudioStreamPlayer.new()
 		ap.volume_db = -8.0
+		ap.bus = "Sfx"
 		add_child(ap)
 		_sfx_players.append(ap)
+	_load_settings()
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	_show_title()
 	if OS.get_environment("YUNHAI_SHOTS") != "":
@@ -138,6 +148,7 @@ func _clear_ui() -> void:
 func _show_title() -> void:
 	_game_on = false
 	_clear_ui()
+	_play_music("sea")
 	var bg := TextureRect.new()
 	bg.texture = UiKit.scene_art("title")
 	bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
@@ -165,9 +176,14 @@ func _show_title() -> void:
 	row.add_theme_constant_override("separation", 12)
 	v.add_child(row)
 	row.add_child(UiKit.button("  新的一局  ", _pick_house))
-	var cont := UiKit.button("继续航程", func(): _start(true), true)
-	cont.disabled = not FileAccess.file_exists(SAVE_PATH)
+	var newest := _newest_save()
+	var cont := UiKit.button("继续航程", func(): _start(true, "lamp", 1, newest), true)
+	cont.disabled = newest == ""
 	row.add_child(cont)
+	var ld := UiKit.button("读取存档", func(): _show_slots(false), true)
+	ld.disabled = newest == ""
+	row.add_child(ld)
+	row.add_child(UiKit.button("设置", _show_settings, true))
 	row.add_child(UiKit.button("怎么玩", _show_help, true))
 	await get_tree().process_frame
 	card.position = Vector2(90, size.y - card.size.y - 70)
@@ -276,10 +292,10 @@ func _show_help() -> void:
 
 # =================================================================== game start
 
-func _start(load_save: bool, house_id: String = "lamp", difficulty: int = 1) -> void:
+func _start(load_save: bool, house_id: String = "lamp", difficulty: int = 1, path: String = SAVE_PATH) -> void:
 	sim = Sim.new()
 	if load_save:
-		var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
+		var f := FileAccess.open(path if path != "" else SAVE_PATH, FileAccess.READ)
 		if f == null or not sim.from_json(f.get_as_text()):
 			sim.new_game(0, house_id, difficulty)
 	else:
@@ -362,6 +378,7 @@ func _build_game() -> void:
 	fp.custom_minimum_size = Vector2(430, 0)
 	fp.add_theme_stylebox_override("panel", UiKit.box(Color(UiKit.PARCH, 0.94), Color(UiKit.BRASS, 0.55), 8, 1, 12))
 	add_child(fp)
+	fleet_panel = fp
 	fleet_box = VBoxContainer.new()
 	fp.add_child(fleet_box)
 	fp.resized.connect(func(): fp.position.y = size.y - fp.size.y - 12)
@@ -372,13 +389,13 @@ func _build_game() -> void:
 	add_child(left_col)
 	tut_panel = PanelContainer.new()
 	tut_panel.add_theme_stylebox_override("panel", UiKit.box(Color(UiKit.INK, 0.92), UiKit.BRASS, 6, 1, 12))
-	tut_panel.custom_minimum_size = Vector2(440, 0)
+	tut_panel.custom_minimum_size = Vector2(400, 0)
 	left_col.add_child(tut_panel)
 	var tv := VBoxContainer.new()
 	tv.add_theme_constant_override("separation", 4)
 	tut_panel.add_child(tv)
-	tut_label = UiKit.para("", 16, Color("f6efdc"))
-	tut_label.custom_minimum_size = Vector2(410, 0)
+	tut_label = UiKit.para("", 15, Color("f6efdc"))
+	tut_label.custom_minimum_size = Vector2(372, 0)
 	tv.add_child(tut_label)
 	var trow := HBoxContainer.new()
 	trow.alignment = BoxContainer.ALIGNMENT_END
@@ -390,14 +407,14 @@ func _build_game() -> void:
 	# one-time hints the first time something new shows up (round 20)
 	hint_panel = PanelContainer.new()
 	hint_panel.add_theme_stylebox_override("panel", UiKit.box(Color(UiKit.PARCH, 0.97), UiKit.JADE, 6, 2, 12))
-	hint_panel.custom_minimum_size = Vector2(440, 0)
+	hint_panel.custom_minimum_size = Vector2(400, 0)
 	hint_panel.visible = false
 	left_col.add_child(hint_panel)
 	var hv := VBoxContainer.new()
 	hv.add_theme_constant_override("separation", 6)
 	hint_panel.add_child(hv)
-	hint_label = UiKit.para("", 15, UiKit.INK)
-	hint_label.custom_minimum_size = Vector2(410, 0)
+	hint_label = UiKit.para("", 14, UiKit.INK)
+	hint_label.custom_minimum_size = Vector2(372, 0)
 	hv.add_child(hint_label)
 	var hrow := HBoxContainer.new()
 	hrow.alignment = BoxContainer.ALIGNMENT_END
@@ -842,7 +859,8 @@ func _enter_town() -> void:
 	town.open(_port)
 	_fade_through(func():
 		town.visible = true
-		map.visible = false)
+		map.visible = false
+		fleet_panel.visible = false)
 	_refresh_region_btn()
 	_refresh_side()
 
@@ -852,7 +870,8 @@ func _leave_town() -> void:
 	_town_kind = ""
 	_fade_through(func():
 		town.visible = false
-		map.visible = true)
+		map.visible = true
+		fleet_panel.visible = true)
 	_refresh_region_btn()
 	_refresh_side()
 
@@ -873,6 +892,15 @@ func _update_mood(animate: bool = false) -> void:
 	var bi := AudioServer.get_bus_index("Music")
 	if bi >= 0:
 		AudioServer.set_bus_effect_enabled(bi, 0, _in_town and _town_kind != "")
+	if sim != null:
+		var want := "sea"
+		if battle_view != null and battle_view.visible:
+			want = "battle"
+		elif sim.festival_on():
+			want = "festival"
+		elif _in_town:
+			want = "town"
+		_play_music(want)
 	if map == null or sim == null:
 		return
 	var season := (int(sim.s["day"]) % GameData.DAYS_YEAR) / 90
@@ -884,6 +912,31 @@ func _update_mood(animate: bool = false) -> void:
 		create_tween().tween_property(map, "modulate", col, 1.2)
 	else:
 		map.modulate = col
+
+
+## Four loops (finish plan, phase F): the sea chart, the towns, air battles and the lantern festival.
+func _play_music(kind: String) -> void:
+	if kind == _music_kind:
+		return
+	_music_kind = kind
+	var music: AudioStreamPlayer = get_node_or_null("Music")
+	if music == null:
+		return
+	if not _music_streams.has(kind):
+		var path := "res://assets/sfx/music.ogg" if kind == "sea" else "res://assets/sfx/music_%s.ogg" % kind
+		var st: AudioStreamOggVorbis = load(path)
+		if st == null:
+			return
+		st.loop = true
+		_music_streams[kind] = st
+	var was_on := music.playing
+	var tw := create_tween()
+	tw.tween_property(music, "volume_db", -40.0, 0.6)
+	tw.tween_callback(func():
+		music.stream = _music_streams[kind]
+		if was_on:
+			music.play())
+	tw.tween_property(music, "volume_db", -13.0, 0.8)
 
 
 func _on_building_entered(kind: String) -> void:
@@ -2083,19 +2136,19 @@ func _toast(text: String, kind: String = "info") -> void:
 	var col: Color = {"info": UiKit.INK, "good": UiKit.JADE, "bad": UiKit.TERRA, "major": UiKit.BRASS, "contract": UiKit.BRASS, "rival": Color("8a5a7a")}.get(kind, UiKit.INK)
 	var p := PanelContainer.new()
 	p.add_theme_stylebox_override("panel", UiKit.box(Color(UiKit.PARCH, 0.97), col, 6, 2, 10))
-	var l := UiKit.para(text, 15, UiKit.INK)
-	l.custom_minimum_size = Vector2(380, 0)
+	var l := UiKit.para(text, 14, UiKit.INK)
+	l.custom_minimum_size = Vector2(360, 0)
 	p.add_child(l)
 	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	toast_box.add_child(p)
 	toast_box.position = Vector2(size.x - 572 - 412, 78)
-	while toast_box.get_child_count() > 4:
+	while toast_box.get_child_count() > 3:
 		var old := toast_box.get_child(0)
 		toast_box.remove_child(old)
 		old.queue_free()
 	var tw := create_tween()
-	tw.tween_interval(5.0)
-	tw.tween_property(p, "modulate:a", 0.0, 0.8)
+	tw.tween_interval(4.0)
+	tw.tween_property(p, "modulate:a", 0.0, 0.6)
 	tw.tween_callback(p.queue_free)
 
 
@@ -2418,10 +2471,12 @@ func _open_battle() -> void:
 	sfx("gong")
 	battle_view.visible = true
 	battle_view.open(sim.battle)
+	_update_mood()
 
 
 func _on_battle_finished() -> void:
 	battle_view.visible = false
+	_update_mood()
 	var out := sim.end_battle()
 	if not out.get("ok", true):
 		return
@@ -2556,11 +2611,48 @@ func _grand_ceremony(gs: Dictionary) -> void:
 func _crown_celebration() -> void:
 	_set_speed(0)
 	sfx("gong")
+	var faces := [["hero_" + sim.pid(), "happy"]]
 	_modal("云海盟主", "story_loyalty", [
 		"你的灯冠第一个点亮。云海诸港奉%s为盟主，各城友好度大增。" % GameData.HOUSES[sim.pid()]["name"],
-		"这不是结束。云海还在，生意还在，继续经营你的商会吧。",
 		"净资产 %s · 用时 %s" % [UiKit.money(sim.net_worth()), GameData.date_text(sim.s["day"])],
-	], [["继续经营", func(): _close_modal()]])
+	], [["看看大家", func(): _crown_epilogue(), true], ["继续经营", func(): _close_modal()]], 720, faces)
+
+
+## The crown epilogue (finish plan, phase F): where everyone stands on the night the crown is lit.
+func _crown_epilogue() -> void:
+	var lines := []
+	var faces := []
+	var crew: Dictionary = sim.crew()
+	for cid in crew:
+		var aff := int(crew[cid].get("aff", 0))
+		var nm := Characters.name_of(cid)
+		if aff >= 80:
+			lines.append("%s挤到塔下最前面，比谁都高兴。" % nm)
+		elif aff >= 40:
+			lines.append("%s在码头上和船员们一起喝酒，说这一趟没白跟。" % nm)
+		else:
+			lines.append("%s远远看了一眼灯冠，又回去忙手上的活。" % nm)
+		if faces.size() < 2:
+			faces.append([cid, "happy" if aff >= 60 else ""])
+	if crew.is_empty():
+		lines.append("塔下的人群里没有你的伙伴：这一路，你是一个人走过来的。")
+	for hid in GameData.HOUSE_IDS:
+		if hid == sim.pid():
+			continue
+		var hh: Dictionary = sim.house(hid)
+		var nm2: String = GameData.HOUSES[hid]["name"]
+		if hh["bankrupt"]:
+			lines.append("%s早已关了门，旧账房的灯今晚也没有亮。" % nm2)
+		elif sim.tie_state(hid) == "ally":
+			lines.append("%s的当家亲自送来贺礼，说盟约照旧。" % nm2)
+		elif sim.tie_state(hid) == "feud":
+			lines.append("%s闭门不出，但他们的船还在云海上跑，明天照样是对手。" % nm2)
+		else:
+			lines.append("%s派人道了贺，灯塔的工地却没有停。" % nm2)
+	if int(sim.s["story"]) < 5:
+		lines.append("陆青的故事还没有写完，灯亮之后她也许还会来找你。")
+	lines.append("这不是结束。云海还在，生意还在。")
+	_modal("灯冠之夜", "", lines, [["继续经营", func(): _close_modal()]], 760, faces)
 	for port in GameData.PORT_IDS:
 		sim.add_friend(port, sim.pid(), 300)
 
@@ -2877,9 +2969,11 @@ func _show_rival(hid: String) -> void:
 
 func _show_menu() -> void:
 	var music: AudioStreamPlayer = get_node("Music")
-	_modal("菜单", "", ["游戏每月自动存档。"], [
+	_modal("菜单", "", ["游戏每月自动存档，另有三个存档位可以手动保存。"], [
 		["音乐：" + ("开" if music.playing else "关"), func(): (music.stop() if music.playing else music.play()); _close_modal(), true],
-		["保存", func(): _save(); _toast("已保存。", "good"); _close_modal(), true],
+		["存档位…", func(): _show_slots(true), true],
+		["读档…", func(): _show_slots(false), true],
+		["设置…", _show_settings, true],
 		["回到标题", func(): _save(); _close_modal(); _show_title(), true],
 		["继续", func(): _close_modal()],
 	])
@@ -2889,7 +2983,7 @@ func _show_end() -> void:
 	_set_speed(0)
 	var o: Dictionary = sim.s["over"]
 	var lines := [o["text"],
-		"用时 %s · 净资产 %s · 灯塔 %d/3 · 陆青的故事 %d/3" % [GameData.date_text(o["day"]), UiKit.money(sim.net_worth()), sim.house()["lh"]["stage"], sim.s["story"]],
+		"用时 %s · 净资产 %s · 灯塔 %d/3 · 陆青的故事 %d/5" % [GameData.date_text(o["day"]), UiKit.money(sim.net_worth()), sim.house()["lh"]["stage"], sim.s["story"]],
 		"评分 %d" % o["score"]]
 	_modal(o["title"], "explore_scene", lines, [
 		["回到标题", func(): _close_modal(); _show_title(), true],
@@ -2899,12 +2993,138 @@ func _show_end() -> void:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(SAVE_PATH))
 
 
-func _save() -> void:
+func _save(path: String = SAVE_PATH) -> void:
 	if sim == null or sim.s["over"] != null:
 		return
-	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f:
 		f.store_string(sim.to_json())
+		f.close()
+		var m := FileAccess.open(path + ".meta", FileAccess.WRITE)
+		if m:
+			m.store_string("%s · %s · %s 金" % [GameData.HOUSES[sim.pid()]["name"], GameData.date_text(sim.s["day"]), UiKit.money(sim.house()["gold"])])
+
+
+func _save_meta(path: String) -> String:
+	if not FileAccess.file_exists(path):
+		return "空"
+	var m := FileAccess.open(path + ".meta", FileAccess.READ)
+	var when := Time.get_datetime_string_from_unix_time(int(FileAccess.get_modified_time(path) + Time.get_time_zone_from_system().get("bias", 0) * 60)).replace("T", " ").left(16)
+	return ("%s　（%s）" % [m.get_as_text(), when]) if m else "旧存档（%s）" % when
+
+
+## The most recently written save among the autosave and the three slots, or "".
+func _newest_save() -> String:
+	var best := ""
+	var best_t := -1
+	for path in [SAVE_PATH, SLOT_FMT % 1, SLOT_FMT % 2, SLOT_FMT % 3]:
+		if FileAccess.file_exists(path):
+			var mt := int(FileAccess.get_modified_time(path))
+			if mt > best_t:
+				best_t = mt
+				best = path
+	return best
+
+
+## Save into or load from a slot. Saving is only offered in a running game.
+func _show_slots(saving: bool) -> void:
+	if modal_layer == null:
+		modal_layer = Control.new()
+		modal_layer.set_anchors_preset(Control.PRESET_FULL_RECT)
+		modal_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(modal_layer)
+	var v := _modal("保存进度" if saving else "读取存档", "", ["自动存档每月一次；三个存档位由你手动保存，互不覆盖。"], [["返回", func(): _close_modal()]], 760)
+	var list := VBoxContainer.new()
+	list.add_theme_constant_override("separation", 8)
+	var paths := [SLOT_FMT % 1, SLOT_FMT % 2, SLOT_FMT % 3]
+	if not saving:
+		paths.push_front(SAVE_PATH)
+	for path: String in paths:
+		var slot_name := "自动存档" if path == SAVE_PATH else "存档位 %s" % path.get_file().trim_prefix("slot_").trim_suffix(".json")
+		var exists := FileAccess.file_exists(path)
+		var b: Button
+		if saving:
+			b = UiKit.button("%s · %s" % [slot_name, _save_meta(path)], func(): _save(path); _close_modal(); _toast("已保存到%s。" % slot_name, "good"), exists)
+		else:
+			b = UiKit.button("%s · %s" % [slot_name, _save_meta(path)], func(): _close_modal(); _start(true, "lamp", 1, path), true)
+			b.disabled = not exists
+		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		b.custom_minimum_size = Vector2(0, 44)
+		list.add_child(b)
+	v.add_child(list)
+	v.move_child(list, v.get_child_count() - 2)
+
+
+# =================================================================== settings
+
+func _load_settings() -> void:
+	var cf := ConfigFile.new()
+	if cf.load(SETTINGS_PATH) == OK:
+		for k in settings:
+			settings[k] = cf.get_value("game", k, settings[k])
+	_apply_settings()
+
+
+func _store_settings() -> void:
+	var cf := ConfigFile.new()
+	for k in settings:
+		cf.set_value("game", k, settings[k])
+	cf.save(SETTINGS_PATH)
+
+
+func _apply_settings() -> void:
+	var mi := AudioServer.get_bus_index("Music")
+	if mi >= 0:
+		AudioServer.set_bus_volume_db(mi, linear_to_db(maxf(0.001, float(settings["music"]) / 100.0)))
+		AudioServer.set_bus_mute(mi, int(settings["music"]) == 0)
+	var si := AudioServer.get_bus_index("Sfx")
+	if si >= 0:
+		AudioServer.set_bus_volume_db(si, linear_to_db(maxf(0.001, float(settings["sfx"]) / 100.0)))
+		AudioServer.set_bus_mute(si, int(settings["sfx"]) == 0)
+	if not OS.has_feature("web") or bool(settings["fullscreen"]):
+		var want := DisplayServer.WINDOW_MODE_FULLSCREEN if bool(settings["fullscreen"]) else DisplayServer.WINDOW_MODE_WINDOWED
+		if DisplayServer.window_get_mode() != want and DisplayServer.get_name() != "headless":
+			DisplayServer.window_set_mode(want)
+	get_window().content_scale_factor = float(settings["scale"])
+
+
+func _show_settings() -> void:
+	if modal_layer == null:
+		modal_layer = Control.new()
+		modal_layer.set_anchors_preset(Control.PRESET_FULL_RECT)
+		modal_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(modal_layer)
+	var v := _modal("设置", "", ["改动立即生效，并记在本机。"], [["完成", func(): _store_settings(); _close_modal(), true]], 640)
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 18)
+	grid.add_theme_constant_override("v_separation", 12)
+	for key in ["music", "sfx"]:
+		grid.add_child(UiKit.label("音乐音量" if key == "music" else "音效音量", 17, UiKit.INK, true))
+		var sl := HSlider.new()
+		sl.min_value = 0
+		sl.max_value = 100
+		sl.step = 5
+		sl.value = float(settings[key])
+		sl.custom_minimum_size = Vector2(320, 24)
+		var k2: String = key
+		sl.value_changed.connect(func(val: float): settings[k2] = int(val); _apply_settings(); if k2 == "sfx": sfx("click"))
+		grid.add_child(sl)
+	grid.add_child(UiKit.label("全屏", 17, UiKit.INK, true))
+	var fs := CheckButton.new()
+	fs.button_pressed = bool(settings["fullscreen"])
+	fs.toggled.connect(func(on: bool): settings["fullscreen"] = on; _apply_settings())
+	grid.add_child(fs)
+	grid.add_child(UiKit.label("界面大小", 17, UiKit.INK, true))
+	var srow := HBoxContainer.new()
+	srow.add_theme_constant_override("separation", 8)
+	for opt in [[0.9, "小"], [1.0, "标准"], [1.12, "大"]]:
+		var sc: float = opt[0]
+		var b := UiKit.button(opt[1], func(): settings["scale"] = sc; _apply_settings(); _store_settings(); _close_modal(); _show_settings(), absf(float(settings["scale"]) - sc) > 0.01)
+		srow.add_child(b)
+	grid.add_child(srow)
+	v.add_child(grid)
+	v.move_child(grid, v.get_child_count() - 2)
 
 
 # =================================================================== tutorial
@@ -2937,6 +3157,9 @@ func _hint(key: String) -> void:
 	sim.s["hints"][key] = true
 	hint_label.text = HINTS[key]
 	hint_panel.visible = true
+	# a hint steps aside by itself after a while so it never sits on the chart
+	var shown: String = HINTS[key]
+	get_tree().create_timer(18.0).timeout.connect(func(): if hint_panel != null and is_instance_valid(hint_panel) and hint_label.text == shown: hint_panel.visible = false)
 
 
 func _tutorial_goal() -> Dictionary:

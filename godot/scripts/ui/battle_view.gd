@@ -25,6 +25,11 @@ var _ended := false
 var _flash: Array = []    # [from, to, t]
 var _ship_tex := {}
 var _t := 0.0
+var _shots: Array = []    # cannonballs in flight: {a, b, t}
+var _booms: Array = []    # explosions with debris: {p, t, seed}
+var _sinking: Array = []  # wrecks falling into the clouds: {p, tex, mine, t}
+var _shake := 0.0
+var _bg_clouds: Array = []
 
 var panel: PanelContainer
 var body: VBoxContainer
@@ -88,6 +93,10 @@ func _ready() -> void:
 	auto_btn = UiKit.button("自动战斗", func(): auto = not auto; _refresh_panel(), true)
 	body.add_child(auto_btn)
 	resized.connect(_layout)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 4242
+	for i in 26:
+		_bg_clouds.append({"x": rng.randf(), "y": rng.randf_range(0.15, 1.0), "r": rng.randf_range(30, 90), "sp": rng.randf_range(0.004, 0.015)})
 
 
 func open(bt: Battle) -> void:
@@ -98,6 +107,10 @@ func open(bt: Battle) -> void:
 	_anim = {}
 	_floats = []
 	_flash = []
+	_shots = []
+	_booms = []
+	_sinking = []
+	_shake = 0.0
 	_mode = "move"
 	_pos = {}
 	_layout()
@@ -152,6 +165,20 @@ func _process(delta: float) -> void:
 	for fl in _flash:
 		fl[2] += delta
 	_flash = _flash.filter(func(fl): return fl[2] < 0.35)
+	for s in _shots:
+		s["t"] += delta
+		if s["t"] >= 0.32 and not s.get("hit", false):
+			s["hit"] = true
+			_booms.append({"p": s["b"], "t": 0.0, "seed": randi()})
+			_shake = maxf(_shake, 5.0)
+	_shots = _shots.filter(func(s): return s["t"] < 0.32)
+	for bm in _booms:
+		bm["t"] += delta
+	_booms = _booms.filter(func(bm): return bm["t"] < 0.9)
+	for sk in _sinking:
+		sk["t"] += delta
+	_sinking = _sinking.filter(func(sk): return sk["t"] < 2.2)
+	_shake = maxf(0.0, _shake - delta * 18.0)
 	queue_redraw()
 	if not _anim.is_empty():
 		_anim["t"] += delta
@@ -209,9 +236,10 @@ func _start_anim(e: Dictionary) -> void:
 		"fire":
 			var a: Vector2 = _pos.get(int(e["uid"]), Vector2.ZERO)
 			var bpos: Vector2 = _pos.get(int(e["tid"]), Vector2.ZERO)
-			_flash.append([a, bpos, 0.0])
-			_floats.append({"text": "−%d" % int(e["dmg"]), "pos": bpos + Vector2(0, -_hex * 0.9), "t": 0.0, "col": UiKit.TERRA})
-			_anim = {"kind": "pause", "t": 0.0, "dur": 0.45}
+			_flash.append([a, a, 0.0])
+			_shots.append({"a": a, "b": bpos, "t": 0.0})
+			_floats.append({"text": "−%d" % int(e["dmg"]), "pos": bpos + Vector2(0, -_hex * 0.9), "t": -0.3, "col": UiKit.TERRA})
+			_anim = {"kind": "pause", "t": 0.0, "dur": 0.65}
 		"board":
 			var bpos2: Vector2 = _pos.get(int(e["tid"]), Vector2.ZERO)
 			var txt := "俘获！" if e["captured"] else ("接舷得手" if e["win"] else "接舷受挫")
@@ -219,6 +247,11 @@ func _start_anim(e: Dictionary) -> void:
 			_anim = {"kind": "pause", "t": 0.0, "dur": 0.6}
 		"sunk":
 			var p3: Vector2 = _pos.get(int(e["uid"]), Vector2.ZERO)
+			var su := battle.unit_by_id(int(e["uid"]))
+			if not su.is_empty():
+				_sinking.append({"p": p3, "tex": _ship_tex[su["type"]], "mine": int(su["side"]) == 0, "t": 0.0})
+				_booms.append({"p": p3, "t": 0.0, "seed": randi()})
+				_shake = 9.0
 			_floats.append({"text": "击沉", "pos": p3 + Vector2(0, -_hex * 0.9), "t": 0.0, "col": UiKit.INK})
 			_anim = {"kind": "pause", "t": 0.0, "dur": 0.5}
 		"flee":
@@ -437,11 +470,11 @@ func _refresh_panel() -> void:
 # ---------------------------------------------------------------- drawing
 
 func _draw() -> void:
-	# sky
-	draw_rect(Rect2(Vector2.ZERO, size), Color("9fb8c4"))
-	draw_rect(Rect2(Vector2.ZERO, size), Color(0.93, 0.95, 0.96, 0.35))
+	_draw_backdrop()
 	if battle == null:
 		return
+	if _shake > 0.0:
+		draw_set_transform(Vector2(randf_range(-_shake, _shake), randf_range(-_shake, _shake)) * 0.5, 0.0, Vector2.ONE)
 	var font := UiKit.font_bold if UiKit.font_bold else ThemeDB.fallback_font
 	var cur := battle.current()
 	var cur_id := int(cur["id"]) if not cur.is_empty() else -1
@@ -465,6 +498,8 @@ func _draw() -> void:
 					fill = Color(1, 1, 1, 0.85)
 				"updraft":
 					fill = Color(0.7, 0.9, 0.95, 0.7)
+			if terr == "":
+				fill.a *= 0.75
 			_hex_poly(p, fill)
 			if _reach.has(k):
 				_hex_poly(p, Color(UiKit.BRASS, 0.3))
@@ -485,17 +520,31 @@ func _draw() -> void:
 				"fog":
 					for i in 3:
 						draw_circle(p + Vector2(float(i - 1) * 9.0, float(i % 2) * 6.0 - 3.0), _hex * 0.25, Color(1, 1, 1, 0.6))
-	# cannon flashes
+	# muzzle smoke at the firing ship
 	for fl in _flash:
 		var a: float = 1.0 - fl[2] / 0.35
-		draw_line(fl[0], fl[1], Color(1.0, 0.85, 0.4, a), 3.0, true)
-		draw_circle(fl[1], 8.0 + 10.0 * (1.0 - a), Color(1.0, 0.6, 0.3, a * 0.7))
+		draw_circle(fl[0], 6.0 + 18.0 * (1.0 - a), Color(1, 1, 1, a * 0.7))
+		draw_circle(fl[0], 5.0 * a, Color(1.0, 0.8, 0.35, a))
+	# wrecks tumbling into the clouds
+	for sk in _sinking:
+		var st: float = sk["t"]
+		var tex3: Texture2D = sk["tex"]
+		var w3 := _hex * 1.55
+		var h3 := w3 * tex3.get_height() / tex3.get_width()
+		var c3: Vector2 = sk["p"] + Vector2(st * 10.0, st * st * 40.0)
+		var flipx := 1.0 if sk["mine"] else -1.0
+		draw_set_transform(c3, st * 0.6 * flipx, Vector2(flipx, 1.0))
+		draw_texture_rect(tex3, Rect2(-Vector2(w3, h3) * 0.5, Vector2(w3, h3)), false, Color(0.55, 0.5, 0.48, clampf(1.0 - st / 2.2, 0.0, 1.0)))
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		for k in 4:
+			var sm := c3 + Vector2(sin(k * 2.1) * 10.0, -st * 30.0 * (k + 1) * 0.4)
+			draw_circle(sm, 6.0 + st * 6.0, Color(0.3, 0.28, 0.3, 0.35 * (1.0 - st / 2.2)))
 	# units
 	for u in battle.b["units"]:
 		if u["status"] != "ok":
 			continue
 		var uid := int(u["id"])
-		var p2: Vector2 = _pos.get(uid, hex_center(int(u["col"]), int(u["row"])))
+		var p2: Vector2 = _pos.get(uid, hex_center(int(u["col"]), int(u["row"]))) + Vector2(0, sin(_t * 1.8 + uid * 1.3) * 2.0)
 		var tex: Texture2D = _ship_tex[u["type"]]
 		var w := _hex * 1.55
 		var h := w * tex.get_height() / tex.get_width()
@@ -529,8 +578,33 @@ func _draw() -> void:
 		if int(u["morale"]) < 35:
 			draw_string(font, Vector2(bx + bw - 14, by - h - 2), "!", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, UiKit.TERRA)
 		draw_string(font, Vector2(bx, by + 22), u["name"], HORIZONTAL_ALIGNMENT_LEFT, bw + 20, 11, UiKit.INK if mine else Color("6b2f2f"))
+	# cannonballs on a shallow arc, then the explosion and splinters
+	for s in _shots:
+		var q: float = s["t"] / 0.32
+		var bp: Vector2 = s["a"].lerp(s["b"], q) + Vector2(0, -sin(q * PI) * _hex * 0.9)
+		for k in 3:
+			var q2 := maxf(0.0, q - 0.06 * (k + 1))
+			draw_circle(s["a"].lerp(s["b"], q2) + Vector2(0, -sin(q2 * PI) * _hex * 0.9), 4.0 - k, Color(1, 1, 1, 0.5 - k * 0.12))
+		draw_circle(bp, 4.5, Color("2b2a2e"))
+	for bm in _booms:
+		var bt: float = bm["t"]
+		var bpp: Vector2 = bm["p"]
+		var fade := 1.0 - bt / 0.9
+		draw_circle(bpp, _hex * (0.3 + bt * 0.8), Color(1.0, 0.55, 0.2, fade * 0.55))
+		draw_circle(bpp, _hex * (0.18 + bt * 0.4), Color(1.0, 0.9, 0.5, fade * 0.8))
+		var rs := RandomNumberGenerator.new()
+		rs.seed = int(bm["seed"])
+		for k in 7:
+			var ang := rs.randf() * TAU
+			var spd := rs.randf_range(40, 90)
+			var dp := bpp + Vector2(cos(ang), sin(ang) - 0.6) * spd * bt + Vector2(0, 120.0 * bt * bt)
+			draw_rect(Rect2(dp, Vector2(4, 2.5)), Color(0.35, 0.25, 0.15, fade))
+		for k in 3:
+			draw_circle(bpp + Vector2((k - 1) * 12.0, -bt * 30.0), 8.0 + bt * 14.0, Color(0.35, 0.33, 0.35, fade * 0.4))
 	# floating texts
 	for f in _floats:
+		if f["t"] < 0.0:
+			continue
 		var a2 := clampf(1.2 - f["t"], 0.0, 1.0)
 		var pos: Vector2 = f["pos"] + Vector2(0, -28.0 * f["t"])
 		draw_string(font, pos + Vector2(1, 1), f["text"], HORIZONTAL_ALIGNMENT_CENTER, 200, 18, Color(1, 1, 1, a2 * 0.8))
@@ -538,6 +612,35 @@ func _draw() -> void:
 	# edges label
 	draw_string(font, Vector2(_board.position.x + 6, _board.position.y + 18), "◀ 我方（在这两列内可撤退）", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(UiKit.INK, 0.7))
 	draw_string(font, Vector2(_board.end.x - 170, _board.position.y + 18), "云盗 ▶", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(UiKit.TERRA, 0.8))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+## A sky above the cloud sea: sun, distant floating isles and slow clouds under the hex board.
+func _draw_backdrop() -> void:
+	var steps := 16
+	for i in steps:
+		var k := float(i) / float(steps - 1)
+		draw_rect(Rect2(0, size.y * float(i) / float(steps), size.x, size.y / float(steps) + 2.0), Color("7fa6bd").lerp(Color("e8dccb"), k))
+	draw_circle(Vector2(size.x * 0.62, size.y * 0.16), 60, Color(1.0, 0.93, 0.7, 0.35))
+	draw_circle(Vector2(size.x * 0.62, size.y * 0.16), 34, Color(1.0, 0.95, 0.8, 0.8))
+	# distant isles
+	var isles := [Vector2(0.12, 0.22), Vector2(0.35, 0.14), Vector2(0.78, 0.25), Vector2(0.52, 0.3)]
+	for i in isles.size():
+		var ip: Vector2 = isles[i] * size + Vector2(0, sin(_t * 0.4 + i) * 3.0)
+		var r := 26.0 + i * 6.0
+		var col := Color(0.45, 0.55, 0.62, 0.45)
+		draw_colored_polygon(PackedVector2Array([ip + Vector2(-r, 0), ip + Vector2(r, 0), ip + Vector2(r * 0.3, r * 1.1), ip + Vector2(-r * 0.25, r * 0.8)]), col)
+		draw_colored_polygon(PackedVector2Array([ip + Vector2(-r, 1), ip + Vector2(-r * 0.6, -r * 0.4), ip + Vector2(0, -r * 0.55), ip + Vector2(r * 0.7, -r * 0.3), ip + Vector2(r, 1)]), Color(0.5, 0.62, 0.6, 0.45))
+	# drifting cloud banks
+	for c in _bg_clouds:
+		var cx := fposmod(float(c["x"]) + _t * float(c["sp"]), 1.2) - 0.1
+		var cp := Vector2(cx * size.x, float(c["y"]) * size.y)
+		var r2: float = c["r"]
+		var a := 0.12 + 0.2 * float(c["y"])
+		draw_circle(cp + Vector2(0, r2 * 0.2), r2, Color(0.75, 0.8, 0.86, a * 0.5))
+		draw_circle(cp, r2 * 0.8, Color(1, 1, 1, a))
+		draw_circle(cp + Vector2(r2 * 0.7, r2 * 0.15), r2 * 0.55, Color(1, 1, 1, a))
+		draw_circle(cp + Vector2(-r2 * 0.7, r2 * 0.2), r2 * 0.5, Color(1, 1, 1, a))
 
 
 func _hex_points(p: Vector2, scale: float) -> PackedVector2Array:
