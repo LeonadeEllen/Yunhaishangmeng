@@ -45,7 +45,22 @@ var top_debt: Label
 var rival_box: HBoxContainer
 var speed_btns := []
 var side: PanelContainer
-var side_body: VBoxContainer
+var side_body: VBoxContainer      # where the tab builders write: the port card or the shop window
+var card_body: VBoxContainer      # the port card on the right of the chart
+var win_layer: Control            # the shop window: one facility at a time, big and readable
+var win_head: HBoxContainer
+var win_tabs: HBoxContainer
+var win_body: VBoxContainer
+var win_scroll: ScrollContainer
+var _win_open := false
+var _fleet_open := true
+var town_hud: HBoxContainer
+var town_bar: PanelContainer
+var left_col: VBoxContainer
+const CARD_W := 400
+const SIDE_W := 424               # card width plus margins: the chart stops here
+const TAB_NAMES := ["交易", "船坞", "商馆", "城主府", "行会", "酒馆", "灯塔"]
+const TAB_KINDS := ["trade", "yard", "post", "hall", "guild", "tavern", "lighthouse"]
 var fleet_box: VBoxContainer
 var fleet_panel: PanelContainer
 var toast_box: VBoxContainer
@@ -337,7 +352,7 @@ func _build_game() -> void:
 	map.sim = sim
 	map.set_anchors_preset(Control.PRESET_FULL_RECT)
 	map.offset_top = 64
-	map.offset_right = -572
+	map.offset_right = -SIDE_W
 	map.port_clicked.connect(_on_port_clicked)
 	map.port_hovered.connect(_on_port_hovered)
 	add_child(map)
@@ -349,17 +364,25 @@ func _build_game() -> void:
 	town.sim = sim
 	town.set_anchors_preset(Control.PRESET_FULL_RECT)
 	town.offset_top = 64
-	town.offset_right = -572
+	town.offset_right = 0
 	town.visible = false
 	town.building_entered.connect(_on_building_entered)
 	add_child(town)
 	_in_town = false
 	_town_kind = ""
+	# in town: a slim bar to go back to the chart or straight to a shop
+	town_bar = PanelContainer.new()
+	town_bar.add_theme_stylebox_override("panel", UiKit.box(Color(UiKit.INK, 0.88), UiKit.BRASS, 8, 1, 8))
+	town_bar.visible = false
+	add_child(town_bar)
+	town_hud = HBoxContainer.new()
+	town_hud.add_theme_constant_override("separation", 6)
+	town_bar.add_child(town_hud)
 	_build_topbar()
 	# side panel
 	side = PanelContainer.new()
 	side.set_anchors_preset(Control.PRESET_RIGHT_WIDE)
-	side.offset_left = -560
+	side.offset_left = -SIDE_W + 12
 	side.offset_top = 76
 	side.offset_bottom = -12
 	side.offset_right = -12
@@ -367,9 +390,11 @@ func _build_game() -> void:
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	side.add_child(scroll)
-	side_body = VBoxContainer.new()
-	side_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(side_body)
+	card_body = VBoxContainer.new()
+	card_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	card_body.add_theme_constant_override("separation", 10)
+	scroll.add_child(card_body)
+	side_body = card_body
 	# fleet panel
 	var fp := PanelContainer.new()
 	fp.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
@@ -383,7 +408,7 @@ func _build_game() -> void:
 	fp.add_child(fleet_box)
 	fp.resized.connect(func(): fp.position.y = size.y - fp.size.y - 12)
 	# tutorial
-	var left_col := VBoxContainer.new()
+	left_col = VBoxContainer.new()
 	left_col.add_theme_constant_override("separation", 8)
 	left_col.position = Vector2(16, 78)
 	add_child(left_col)
@@ -430,14 +455,18 @@ func _build_game() -> void:
 	cp.name = "Crisis"
 	add_child(cp)
 	toast_box = VBoxContainer.new()
-	toast_box.position = Vector2(size.x - 572 - 412, 78)
 	toast_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	toast_box.alignment = BoxContainer.ALIGNMENT_END
+	toast_box.add_theme_constant_override("separation", 6)
 	add_child(toast_box)
 	hover_card = PanelContainer.new()
 	hover_card.add_theme_stylebox_override("panel", UiKit.box(Color("fffaf0"), UiKit.BRASS, 6, 1, 10))
 	hover_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hover_card.visible = false
 	add_child(hover_card)
+	_build_window()
+	move_child(toast_box, get_child_count() - 1)
+	move_child(hover_card, get_child_count() - 1)
 	battle_view = BattleView.new()
 	battle_view.set_anchors_preset(Control.PRESET_FULL_RECT)
 	battle_view.visible = false
@@ -517,7 +546,7 @@ func _build_topbar() -> void:
 func _process(delta: float) -> void:
 	if not _game_on:
 		return
-	if not _modal_open and SPEEDS[speed_idx] > 0 and not sim.blocked():
+	if not _modal_open and not _win_open and SPEEDS[speed_idx] > 0 and not sim.blocked():
 		_acc += delta * SPEEDS[speed_idx]
 		var steps := 0
 		while _acc >= 1.0 and steps < 12 and not sim.blocked():
@@ -608,6 +637,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		KEY_ESCAPE:
 			if _modal_open:
 				_close_modal()
+			elif _win_open:
+				_close_window()
 			elif _in_town:
 				_leave_town()
 		KEY_E:
@@ -706,10 +737,20 @@ func _refresh_side_soft() -> void:
 
 func _refresh_fleet() -> void:
 	UiKit.clear(fleet_box)
+	if fleet_panel != null:
+		fleet_panel.reset_size.call_deferred()
 	var head := HBoxContainer.new()
 	var loans := sim.ships_of().size() - sim.own_ships().size()
 	head.add_child(UiKit.label("船队 %d/%d%s" % [sim.own_ships().size(), sim.max_ships(), (" · 借 %d" % loans) if loans > 0 else ""], 18, UiKit.INK, true))
+	var hsp := Control.new()
+	hsp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(hsp)
+	var tg := UiKit.button("收起 ▾" if _fleet_open else "展开 ▴", func(): _fleet_open = not _fleet_open; _refresh_fleet(), true)
+	tg.add_theme_font_size_override("font_size", 13)
+	head.add_child(tg)
 	fleet_box.add_child(head)
+	if not _fleet_open:
+		return
 	var fl := sim.flagship()
 	var ordered := sim.fleet_ships(fl)
 	for sh in sim.ships_of():
@@ -790,7 +831,7 @@ func _on_port_hovered(pid: String) -> void:
 		hover_card.visible = true
 		hover_card.reset_size()
 		var mp0 := get_local_mouse_position() + Vector2(18, 18)
-		hover_card.position = Vector2(minf(mp0.x, size.x - 572 - hover_card.size.x - 8), minf(mp0.y, size.y - hover_card.size.y - 8))
+		hover_card.position = Vector2(minf(mp0.x, size.x - SIDE_W - hover_card.size.x - 8), minf(mp0.y, size.y - hover_card.size.y - 8))
 		return
 	v.add_child(UiKit.label(GameData.port_name(pid), 18, UiKit.INK, true))
 	if not fl.is_empty() and sim.docked(fl) and fl["port"] != pid:
@@ -816,12 +857,12 @@ func _on_port_hovered(pid: String) -> void:
 	hover_card.visible = true
 	hover_card.reset_size()
 	var mp := get_local_mouse_position() + Vector2(18, 18)
-	hover_card.position = Vector2(minf(mp.x, size.x - 572 - hover_card.size.x - 8), minf(mp.y, size.y - hover_card.size.y - 8))
+	hover_card.position = Vector2(minf(mp.x, size.x - SIDE_W - hover_card.size.x - 8), minf(mp.y, size.y - hover_card.size.y - 8))
 
 
 func _on_port_clicked(pid: String) -> void:
 	if GameData.PORTS.has(pid):
-		_open_port(pid, 0 if _port != pid else _tab)
+		_open_port(pid)
 	else:
 		_open_spot(pid)
 
@@ -840,6 +881,10 @@ func _open_port(pid: String, tab: int = -1) -> void:
 	_spot = ""
 	if tab >= 0:
 		_tab = tab
+		_build_plot = -1
+		_win_open = true
+	elif _win_open and not _in_town:
+		_win_open = false
 	map.selected_port = pid
 	if _in_town and pid != town.port:
 		_leave_town()
@@ -857,20 +902,42 @@ func _enter_town() -> void:
 	_in_town = true
 	_town_kind = ""
 	town.open(_port)
+	_win_open = false
+	_fill_town_hud()
 	_fade_through(func():
 		town.visible = true
 		map.visible = false
+		side.visible = false
+		town_bar.visible = true
 		fleet_panel.visible = false)
 	_refresh_region_btn()
 	_refresh_side()
 
 
+func _fill_town_hud() -> void:
+	UiKit.clear(town_hud)
+	town_hud.add_child(UiKit.label("直接去：", 15, Color("f6efdc"), true))
+	for i in TAB_NAMES.size():
+		if i == 6 and _port != GameData.HOUSES[sim.pid()]["home"]:
+			continue
+		var ii: int = i
+		var b := UiKit.button(TAB_NAMES[i], func(): _open_port(_port, ii), true)
+		b.add_theme_font_size_override("font_size", 15)
+		town_hud.add_child(b)
+	town_hud.add_child(UiKit.button("回到海图（Esc）", _leave_town))
+	town_bar.reset_size()
+	town_bar.position = Vector2(size.x - town_bar.get_combined_minimum_size().x - 12, 76)
+
+
 func _leave_town() -> void:
 	_in_town = false
 	_town_kind = ""
+	_win_open = false
 	_fade_through(func():
 		town.visible = false
 		map.visible = true
+		side.visible = true
+		town_bar.visible = false
 		fleet_panel.visible = true)
 	_refresh_region_btn()
 	_refresh_side()
@@ -944,87 +1011,232 @@ func _on_building_entered(kind: String) -> void:
 	_town_kind = kind
 	_tab = town.tab_of(kind)
 	_build_plot = -1
+	_win_open = true
 	_refresh_side()
 
 
 
 func _refresh_side() -> void:
-	if side_body == null:
+	if card_body == null:
 		return
 	_update_mood()
+	side_body = card_body
 	if _spot != "":
-		UiKit.clear(side_body)
+		_win_open = false
+		_show_window(false)
+		UiKit.clear(card_body)
 		_spot_panel()
 		return
 	if _port == "":
 		return
-	UiKit.clear(side_body)
+	_build_card()
+	_show_window(_win_open)
+	if _win_open:
+		_fill_window()
+
+
+## The port card: who the port is, how to get there, and one big button per facility.
+func _build_card() -> void:
+	UiKit.clear(card_body)
 	var p: Dictionary = GameData.PORTS[_port]
 	var fl := sim.flagship()
 	var here: bool = not fl.is_empty() and sim.docked(fl) and fl["port"] == _port
-	# header
 	var head := HBoxContainer.new()
-	head.add_child(UiKit.icon(UiKit.sprite("map_islands", p["island"]), 74))
+	head.add_theme_constant_override("separation", 10)
+	head.add_child(UiKit.icon(UiKit.sprite("map_islands", p["island"]), 84))
 	var hv := VBoxContainer.new()
 	hv.add_theme_constant_override("separation", 2)
 	hv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var title := p["name"] as String
+	hv.add_child(UiKit.label(p["name"], 26, UiKit.INK, true))
 	for hid in GameData.HOUSE_IDS:
 		if GameData.HOUSES[hid]["home"] == _port:
-			title += " · %s母港" % GameData.HOUSES[hid]["name"]
-	hv.add_child(UiKit.label(title, 24, UiKit.INK, true))
-	hv.add_child(UiKit.para(p["desc"], 14, UiKit.MUTED))
-	var tags := HBoxContainer.new()
-	tags.add_theme_constant_override("separation", 4)
-	tags.add_child(UiKit.label("特产", 13, UiKit.UP, true))
-	for g in p["make"]:
-		tags.add_child(UiKit.icon(UiKit.sprite("goods", GameData.GOODS[g]["icon"]), 22))
-		tags.add_child(UiKit.label(GameData.good_name(g), 13))
-	tags.add_child(UiKit.label("  需求", 13, UiKit.DOWN, true))
-	for g in p["want"]:
-		tags.add_child(UiKit.icon(UiKit.sprite("goods", GameData.GOODS[g]["icon"]), 22))
-		tags.add_child(UiKit.label(GameData.good_name(g), 13))
-	hv.add_child(tags)
+			hv.add_child(UiKit.label("%s母港" % GameData.HOUSES[hid]["name"], 14, UiKit.BRASS, true))
+	hv.add_child(UiKit.label("友好 %s · 港主 %s" % [GameData.FRIEND_NAMES[sim.friend_level(_port)], GameData.HOUSES[sim.patron(_port)]["name"] if sim.patron(_port) != "" else "无"], 13, UiKit.MUTED))
 	head.add_child(hv)
-	side_body.add_child(head)
+	card_body.add_child(head)
+	card_body.add_child(UiKit.para(p["desc"], 14, UiKit.MUTED))
+	for row in [["特产", p["make"], UiKit.UP], ["需求", p["want"], UiKit.DOWN]]:
+		var tags := HFlowContainer.new()
+		tags.add_theme_constant_override("h_separation", 6)
+		tags.add_child(UiKit.label(row[0], 14, row[2], true))
+		for g in row[1]:
+			var chip := HBoxContainer.new()
+			chip.add_theme_constant_override("separation", 2)
+			chip.add_child(UiKit.icon(UiKit.sprite("goods", GameData.GOODS[g]["icon"]), 24))
+			chip.add_child(UiKit.label(GameData.good_name(g), 14))
+			tags.add_child(chip)
+		card_body.add_child(tags)
+	# the one thing to do next with the flagship
 	if here:
-		var tb := HBoxContainer.new()
-		tb.add_theme_constant_override("separation", 6)
-		if _in_town:
-			tb.add_child(UiKit.button("回到海图（Esc）", _leave_town, true))
-			if _town_kind != "":
-				tb.add_child(UiKit.button("走出%s" % town.kind_name(_town_kind), func(): _town_kind = ""; _refresh_side(), true))
-		else:
-			var eb := UiKit.button("进城 · 在街上走走", _enter_town)
-			eb.tooltip_text = "进入 %s 的街道，点建筑办事。" % p["name"]
-			tb.add_child(eb)
-		side_body.add_child(tb)
-		if _in_town and _town_kind != "":
-			side_body.add_child(_interior_strip(_town_kind))
-	if not fl.is_empty() and sim.docked(fl) and not here:
-		var days := sim.ship_days(fl, _port)
-		var fc := sim.fuel_cost_for(fl, _port)
-		var go := UiKit.button("旗舰起航前往此港 · %d 天 · 补给 %d 金" % [days, fc], func(): _sail(_port))
+		var eb := UiKit.button("进城 · 在街上走走", _enter_town)
+		eb.tooltip_text = "进入 %s 的街道，走进店里办事。" % p["name"]
+		eb.custom_minimum_size = Vector2(0, 46)
+		card_body.add_child(eb)
+	elif not fl.is_empty() and sim.docked(fl):
+		var go := UiKit.button("旗舰起航 · %d 天 · 补给 %d 金" % [sim.ship_days(fl, _port), sim.fuel_cost_for(fl, _port)], func(): _sail(_port))
+		go.custom_minimum_size = Vector2(0, 46)
 		if _tut_step() == 1 and _port == _tutorial_goal()["dest"]:
 			_pulse(go)
-		side_body.add_child(go)
-	elif not fl.is_empty() and not sim.docked(fl):
-		side_body.add_child(UiKit.label("旗舰航行中：前往 %s，剩 %d 天" % [GameData.port_name(fl["to"]), int(fl["arrive"]) - int(sim.s["day"])], 15, UiKit.JADE, true))
-	# tabs
-	var tabs := HBoxContainer.new()
-	tabs.add_theme_constant_override("separation", 4)
-	var names := ["交易", "船坞", "商馆", "城主府", "行会", "酒馆", "灯塔"]
-	for i in names.size():
+		card_body.add_child(go)
+	elif not fl.is_empty():
+		card_body.add_child(UiKit.label("旗舰航行中：前往 %s，剩 %d 天" % [GameData.port_name(fl["to"]), int(fl["arrive"]) - int(sim.s["day"])], 15, UiKit.JADE, true))
+	card_body.add_child(UiKit.label("城中设施" if here else "城中设施（旗舰不在，只能看行情）", 15, UiKit.INK, true))
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 8)
+	grid.add_theme_constant_override("v_separation", 8)
+	for i in TAB_NAMES.size():
 		if i == 6 and _port != GameData.HOUSES[sim.pid()]["home"]:
 			continue
-		var b := UiKit.button(names[i], func(): _tab = i; _build_plot = -1; _refresh_side(), i != _tab)
+		var ii: int = i
+		var b := UiKit.button("%s\n%s" % [TAB_NAMES[i], _tab_status(i, here)], func(): _open_port(_port, ii), not (_win_open and _tab == i))
+		b.custom_minimum_size = Vector2((CARD_W - 40) / 2.0, 62)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.add_theme_font_size_override("font_size", 15)
-		if (_tut_step() == 3 and i == 1 and sim.house()["gold"] >= sim.ship_price("freighter") and _tab != 1) or (_tut_step() == 8 and i == 6 and _tab != 6):
+		if not _win_open and ((_tut_step() == 0 and i == 0 and here) or (_tut_step() == 2 and i == 0 and here) or (_tut_step() == 3 and i == 1 and sim.house()["gold"] >= sim.ship_price("freighter")) or (_tut_step() == 5 and i == 5) or (_tut_step() == 7 and i == 2) or (_tut_step() == 8 and i == 6)):
 			_pulse(b)
-		tabs.add_child(b)
-	side_body.add_child(tabs)
+		grid.add_child(b)
+	card_body.add_child(grid)
+	var cons := sim.open_contracts(_port)
+	if not cons.is_empty():
+		card_body.add_child(UiKit.label("本港委托 %d 张，去酒馆看看。" % cons.size(), 14, UiKit.BRASS, true))
+
+
+## One short line under each facility button so the card says what is waiting there.
+func _tab_status(i: int, here: bool) -> String:
+	var hid := sim.pid()
+	match i:
+		0:
+			var fl := sim.flagship()
+			return ("货舱 %d / %d" % [sim.fleet_cargo_used(fl), sim.fleet_cargo_cap(fl)]) if here else "看行情"
+		1:
+			return "船队 %d / %d" % [sim.own_ships().size(), sim.max_ships()]
+		2:
+			return ("仓库 %d / %d" % [Industry.wh_used(sim, _port, hid), Industry.wh_cap(sim, _port, hid)]) if Industry.has_wh(sim, _port, hid) else "未开商馆"
+		3:
+			return "友好 " + GameData.FRIEND_NAMES[sim.friend_level(_port)]
+		4:
+			return "图纸与探索"
+		5:
+			var n := sim.open_contracts(_port).size()
+			return ("委托 %d 张" % n) if n > 0 else "伙伴与消息"
+		6:
+			return "第 %d / 3 层" % int(sim.house()["lh"]["stage"])
+	return ""
+
+
+## The shop window: a large panel over the chart or the town for one facility at a time.
+func _build_window() -> void:
+	win_layer = Control.new()
+	win_layer.set_anchors_preset(Control.PRESET_FULL_RECT)
+	win_layer.mouse_filter = Control.MOUSE_FILTER_STOP
+	win_layer.visible = false
+	add_child(win_layer)
+	var dim := ColorRect.new()
+	dim.color = Color(0.06, 0.09, 0.12, 0.45)
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.gui_input.connect(func(ev): if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT: _close_window())
+	win_layer.add_child(dim)
+	var panel := PanelContainer.new()
+	panel.name = "WinPanel"
+	panel.add_theme_stylebox_override("panel", UiKit.box(UiKit.PARCH, UiKit.BRASS, 10, 2, 20))
+	win_layer.add_child(panel)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 10)
+	panel.add_child(v)
+	win_head = HBoxContainer.new()
+	win_head.add_theme_constant_override("separation", 14)
+	v.add_child(win_head)
+	win_tabs = HBoxContainer.new()
+	win_tabs.add_theme_constant_override("separation", 6)
+	v.add_child(win_tabs)
+	v.add_child(HSeparator.new())
+	win_scroll = ScrollContainer.new()
+	win_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	win_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	v.add_child(win_scroll)
+	win_body = VBoxContainer.new()
+	win_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	win_body.add_theme_constant_override("separation", 10)
+	win_scroll.add_child(win_body)
+	resized.connect(_place_window)
+
+
+func _place_window() -> void:
+	if win_layer == null:
+		return
+	var panel: PanelContainer = win_layer.get_node("WinPanel")
+	var w := minf(1160.0, size.x - 80.0)
+	var h := size.y - 120.0
+	panel.position = Vector2((size.x - w) * 0.5, 84.0)
+	panel.size = Vector2(w, h)
+	panel.custom_minimum_size = Vector2(w, h)
+
+
+func _show_window(on: bool) -> void:
+	if win_layer == null:
+		return
+	if on and not win_layer.visible:
+		sfx("page")
+		_place_window()
+	var changed := win_layer.visible != on
+	win_layer.visible = on
+	if changed:
+		_place_toasts.call_deferred()
+	if fleet_panel != null:
+		fleet_panel.visible = not on and not _in_town
+	if left_col != null:
+		left_col.visible = not on
+	if town_bar != null:
+		town_bar.visible = _in_town and not on
+
+
+func _close_window() -> void:
+	_win_open = false
+	if _in_town:
+		_town_kind = ""
+	_show_window(false)
+	_refresh_side()
+
+
+func _fill_window() -> void:
+	var fl := sim.flagship()
+	var here: bool = not fl.is_empty() and sim.docked(fl) and fl["port"] == _port
 	if _tab == 6 and _port != GameData.HOUSES[sim.pid()]["home"]:
 		_tab = 0
+	var keep_scroll := win_scroll.scroll_vertical
+	UiKit.clear(win_head)
+	UiKit.clear(win_tabs)
+	UiKit.clear(win_body)
+	# who you are talking to
+	var kind: String = TAB_KINDS[_tab]
+	var face: String = town.npc_portrait(kind) if town != null else ""
+	if face == "":
+		face = "hero_" + sim.pid()
+	var fr := PanelContainer.new()
+	fr.add_theme_stylebox_override("panel", UiKit.box(Color("fbf5e6"), UiKit.BRASS, 6, 2, 2))
+	fr.add_child(UiKit.icon(UiKit.portrait(face, "happy" if kind == "tavern" else ""), 92))
+	win_head.add_child(fr)
+	var hv := VBoxContainer.new()
+	hv.add_theme_constant_override("separation", 4)
+	hv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hv.add_child(UiKit.label("%s · %s" % [GameData.port_name(_port), TAB_NAMES[_tab]], 28, UiKit.INK, true))
+	hv.add_child(UiKit.para(_greeting(kind) if here else "旗舰不在此港：这里看到的是最近一次的消息。", 16, UiKit.MUTED))
+	win_head.add_child(hv)
+	var close := UiKit.button("关闭（Esc）", _close_window, true)
+	close.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	win_head.add_child(close)
+	for i in TAB_NAMES.size():
+		if i == 6 and _port != GameData.HOUSES[sim.pid()]["home"]:
+			continue
+		var ii: int = i
+		var b := UiKit.button(TAB_NAMES[i], func(): _tab = ii; _build_plot = -1; _refresh_side(), i != _tab)
+		b.add_theme_font_size_override("font_size", 17)
+		b.custom_minimum_size = Vector2(96, 40)
+		if (_tut_step() == 3 and i == 1 and sim.house()["gold"] >= sim.ship_price("freighter") and _tab != 1) or (_tut_step() == 8 and i == 6 and _tab != 6):
+			_pulse(b)
+		win_tabs.add_child(b)
+	side_body = win_body
 	match _tab:
 		0: _tab_trade(here)
 		1: _tab_yard(here)
@@ -1033,6 +1245,38 @@ func _refresh_side() -> void:
 		4: _tab_guild()
 		5: _tab_tavern()
 		6: _tab_lighthouse()
+	side_body = card_body
+	_bump_fonts(win_body)
+	win_scroll.set_deferred("scroll_vertical", keep_scroll)
+
+
+## The tab builders were written for the narrow side panel; in the big window small print grows a size.
+func _bump_fonts(n: Node) -> void:
+	for c in n.get_children():
+		if c is Label or c is Button:
+			var fs: int = c.get_theme_font_size("font_size")
+			if fs < 16:
+				c.add_theme_font_size_override("font_size", fs + 2)
+		_bump_fonts(c)
+
+
+func _place_toasts() -> void:
+	if toast_box == null:
+		return
+	toast_box.reset_size()
+	if win_layer != null and win_layer.visible:
+		# beside the shopkeeper's line in the window header, clear of the table
+		var panel: PanelContainer = win_layer.get_node("WinPanel")
+		var n := toast_box.get_child_count()
+		for i in n:
+			(toast_box.get_child(i) as Control).visible = i >= n - 2
+		toast_box.reset_size()
+		toast_box.position = Vector2(panel.position.x + panel.size.x - toast_box.size.x - 150.0, panel.position.y + 14.0)
+		return
+	for c in toast_box.get_children():
+		(c as Control).visible = true
+	var area_w: float = size.x - (SIDE_W if side != null and side.visible else 0.0)
+	toast_box.position = Vector2((area_w - toast_box.size.x) * 0.5, size.y - toast_box.size.y - 24.0)
 
 
 ## Side panel for a point in the eastern fog: what is known about it and the way to get there.
@@ -1176,7 +1420,7 @@ func _refresh_region_btn() -> void:
 	region_btn.visible = sim.explore_open() and not _in_town
 	region_btn.text = "东云域 ▶" if map.region == 1 else "◀ 霞市"
 	region_btn.reset_size()
-	region_btn.position = Vector2(size.x - 572 - region_btn.size.x - 16, size.y - region_btn.size.y - 16)
+	region_btn.position = Vector2(size.x - SIDE_W - region_btn.size.x - 16, size.y - region_btn.size.y - 16)
 
 
 func _contract_row(c: Dictionary, fl: Dictionary, show_port: bool) -> Control:
@@ -1328,7 +1572,7 @@ func _tab_trade(here: bool) -> void:
 	var info := HBoxContainer.new()
 	info.add_theme_constant_override("separation", 12)
 	var pat := sim.patron(_port)
-	info.add_child(UiKit.label("港主 " + (GameData.HOUSES[pat]["name"] if pat != "" else "无"), 13, UiKit.BRASS if pat == hid else UiKit.MUTED))
+	info.add_child(UiKit.label("港主 " + (GameData.HOUSES[pat]["name"] if pat != "" else "无"), 15, UiKit.BRASS if pat == hid else UiKit.MUTED))
 	var ben := sim.benefactor(_port)
 	if ben != "":
 		info.add_child(UiKit.label("恩主 " + GameData.HOUSES[ben]["name"], 13, UiKit.BRASS if ben == hid else UiKit.MUTED))
@@ -1348,31 +1592,32 @@ func _tab_trade(here: bool) -> void:
 		var modes := ["船队 ⇄ 市场", "商馆 ⇄ 市场", "船队 ⇄ 商馆"]
 		for i in modes.size():
 			var mb := UiKit.button(modes[i], func(): _trade_mode = i; _refresh_side(), i != _trade_mode)
-			mb.add_theme_font_size_override("font_size", 13)
+			mb.add_theme_font_size_override("font_size", 15)
 			mb.disabled = i > 0 and not has_post
 			sel.add_child(mb)
 		var sp := Control.new()
 		sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		sel.add_child(sp)
-		sel.add_child(UiKit.label("每次", 13, UiKit.MUTED))
+		sel.add_child(UiKit.label("每次", 15, UiKit.MUTED))
 		for q in [1, 10, 50, 9999]:
 			var qq: int = q
 			var qb := UiKit.button("全部" if q == 9999 else str(q), func(): _trade_qty = qq; _refresh_side(), q != _trade_qty)
-			qb.add_theme_font_size_override("font_size", 13)
-			qb.custom_minimum_size = Vector2(40, 0)
+			qb.add_theme_font_size_override("font_size", 15)
+			qb.custom_minimum_size = Vector2(56, 34)
 			sel.add_child(qb)
 		side_body.add_child(sel)
 	for c in sim.open_contracts(_port):
 		side_body.add_child(_contract_row(c, fl, false))
 	# table
 	var grid := GridContainer.new()
-	grid.columns = 8
-	grid.add_theme_constant_override("h_separation", 6)
-	grid.add_theme_constant_override("v_separation", 3)
+	grid.columns = 9
+	grid.add_theme_constant_override("h_separation", 18)
+	grid.add_theme_constant_override("v_separation", 6)
 	var left_name: String = ["船上", "商馆", "船上"][_trade_mode]
 	var right_name: String = ["市场", "市场", "商馆"][_trade_mode]
-	for hd in ["货物", "库存", "买价", "卖价", "均价", left_name, "商馆" if _trade_mode != 1 else "船上", ""]:
-		var hl := UiKit.label(hd, 12, UiKit.MUTED, true)
+	for hd in ["货物", "库存", "买价", "卖价", "成本", left_name, "商馆" if _trade_mode != 1 else "船上", "别处最高卖价", ""]:
+		var hl := UiKit.label(hd, 14, UiKit.MUTED, true)
+		hl.custom_minimum_size = Vector2({"货物": 130, "别处最高卖价": 150, "": 180}.get(hd, 52), 0)
 		grid.add_child(hl)
 	var order: Array = []
 	for g in p["make"]:
@@ -1389,7 +1634,7 @@ func _tab_trade(here: bool) -> void:
 		var t := GameData.tier(g)
 		var gh := HBoxContainer.new()
 		gh.add_theme_constant_override("separation", 3)
-		gh.add_child(UiKit.icon(GameData.icon_of(g), 24))
+		gh.add_child(UiKit.icon(GameData.icon_of(g), 32))
 		var tcol := UiKit.INK
 		var bold := false
 		if g in p["make"]:
@@ -1398,8 +1643,8 @@ func _tab_trade(here: bool) -> void:
 		elif g in p["want"]:
 			tcol = UiKit.DOWN
 			bold = true
-		var nl := UiKit.label(GameData.good_name(g), 13, tcol, bold)
-		nl.custom_minimum_size = Vector2(66, 0)
+		var nl := UiKit.label(GameData.good_name(g), 17, tcol, bold)
+		nl.custom_minimum_size = Vector2(84, 0)
 		var ghome: String = GameData.GOODS[g].get("home", "")
 		var origin := "\n没有城市天然出产，只能靠工坊制造"
 		if ghome != "" and GameData.PORTS.has(ghome):
@@ -1409,11 +1654,11 @@ func _tab_trade(here: bool) -> void:
 		gh.add_child(nl)
 		grid.add_child(gh)
 		var stock: int = int(sim.s["ports"][_port]["market"][g]["stock"]) if here else -1
-		grid.add_child(UiKit.label(str(stock) if stock >= 0 else "?", 13, UiKit.MUTED))
+		grid.add_child(UiKit.label(str(stock) if stock >= 0 else "?", 16, UiKit.MUTED))
 		var bp: int = sim.buy_price(_port, g) if here else int(intel["prices"][g][0])
 		var spr: int = sim.sell_price(_port, g) if here else int(intel["prices"][g][1])
 		var base: float = GameData.GOODS[g]["base"]
-		grid.add_child(UiKit.label(str(bp), 13, UiKit.UP if bp < base * 0.85 else (UiKit.DOWN if bp > base * 1.3 else UiKit.INK), true))
+		grid.add_child(UiKit.label(str(bp), 17, UiKit.UP if bp < base * 0.85 else (UiKit.DOWN if bp > base * 1.3 else UiKit.INK), true))
 		var trend := ""
 		var prev = sim.s.get("intel_prev", {}).get(_port)
 		if prev != null:
@@ -1422,7 +1667,7 @@ func _tab_trade(here: bool) -> void:
 				trend = "▲"
 			elif spr < old_s * 0.97:
 				trend = "▼"
-		var sl := UiKit.label(str(spr) + trend, 13, UiKit.UP if spr > base * 1.3 else UiKit.INK, true)
+		var sl := UiKit.label(str(spr) + trend, 17, UiKit.UP if spr > base * 1.3 else UiKit.INK, true)
 		if trend != "":
 			sl.tooltip_text = "上次到访时卖价 %d" % int(prev["prices"][g][1])
 			sl.mouse_filter = Control.MOUSE_FILTER_PASS
@@ -1433,21 +1678,29 @@ func _tab_trade(here: bool) -> void:
 			held = int(fcargo[g]["qty"])
 			avg = float(fcargo[g]["cost"])
 		var in_wh := int(wh.get(g, 0))
-		var al := UiKit.label(str(int(avg)) if held > 0 else "—", 13, UiKit.UP if held > 0 and spr > avg else UiKit.MUTED)
+		var al := UiKit.label(str(int(avg)) if held > 0 else "—", 16, UiKit.UP if held > 0 and spr > avg else UiKit.MUTED)
 		if held > 0:
 			al.tooltip_text = "船上这批货的平均成本；卖价高于它就是赚。"
 			al.mouse_filter = Control.MOUSE_FILTER_PASS
 		grid.add_child(al)
 		var left_qty: int = [held, in_wh, held][_trade_mode]
 		var other_qty: int = [in_wh, held, in_wh][_trade_mode]
-		grid.add_child(UiKit.label(str(left_qty), 13, UiKit.INK, left_qty > 0))
-		grid.add_child(UiKit.label(str(other_qty), 13, UiKit.MUTED))
+		grid.add_child(UiKit.label(str(left_qty), 17, UiKit.INK, left_qty > 0))
+		grid.add_child(UiKit.label(str(other_qty), 16, UiKit.MUTED))
+		var bk := _best_known_sell(g, _port)
+		if bk.is_empty():
+			grid.add_child(UiKit.label("—", 14, UiKit.MUTED))
+		else:
+			var bl := UiKit.label("%s %d" % [GameData.port_name(bk["port"]), int(bk["price"])], 14, UiKit.UP if int(bk["price"]) > bp * 1.15 else UiKit.MUTED, int(bk["price"]) > bp * 1.15)
+			bl.tooltip_text = "已知行情里卖得最高的港口（%d 天前的消息）" % int(bk["age"])
+			bl.mouse_filter = Control.MOUSE_FILTER_PASS
+			grid.add_child(bl)
 		var btns := HBoxContainer.new()
-		btns.add_theme_constant_override("separation", 2)
+		btns.add_theme_constant_override("separation", 6)
 		if here:
 			var gg: String = g
-			var b_in := UiKit.button("◀", func(): _trade_op(true, gg), true)
-			var b_out := UiKit.button("▶", func(): _trade_op(false, gg), true)
+			var b_in := UiKit.button(["买入", "买进商馆", "装船"][_trade_mode], func(): _trade_op(true, gg), true)
+			var b_out := UiKit.button(["卖出", "卖出", "卸货"][_trade_mode], func(): _trade_op(false, gg), true)
 			b_in.tooltip_text = ["买入到船上", "买入到商馆", "从商馆装上船"][_trade_mode]
 			b_out.tooltip_text = ["从船上卖出", "从商馆卖出", "从船上卸进商馆"][_trade_mode]
 			match _trade_mode:
@@ -1465,13 +1718,13 @@ func _tab_trade(here: bool) -> void:
 			if _tut_step() == 2 and held > 0 and _trade_mode == 0:
 				_pulse(b_out)
 			for b in [b_in, b_out]:
-				b.add_theme_font_size_override("font_size", 12)
-				b.custom_minimum_size = Vector2(30, 26)
+				b.add_theme_font_size_override("font_size", 15)
+				b.custom_minimum_size = Vector2(84, 34)
 				b.mouse_filter = Control.MOUSE_FILTER_STOP
 				btns.add_child(b)
 		grid.add_child(btns)
 	side_body.add_child(grid)
-	side_body.add_child(UiKit.label("绿色 = 本城招牌货，红色 = 本城常年需求。◀ 向左边栏买入或装货，▶ 向右卖出或卸货。", 12, UiKit.MUTED))
+	side_body.add_child(UiKit.label("绿色 = 本城招牌货，红色 = 本城常年需求。「成本」是船上这批货的平均买价，卖价高过它就是赚。", 14, UiKit.MUTED))
 
 
 func _best_known_sell(g: String, exclude: String) -> Dictionary:
@@ -2141,7 +2394,7 @@ func _toast(text: String, kind: String = "info") -> void:
 	p.add_child(l)
 	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	toast_box.add_child(p)
-	toast_box.position = Vector2(size.x - 572 - 412, 78)
+	_place_toasts.call_deferred()
 	while toast_box.get_child_count() > 3:
 		var old := toast_box.get_child(0)
 		toast_box.remove_child(old)
@@ -3236,12 +3489,12 @@ func _update_tutorial() -> void:
 		mats.append("%s %d" % [GameData.good_name(g), st0["mats"][g]])
 	match step:
 		0:
-			text = "①在%s的「交易」页，把右上的「每次」切到「全部」，再按%s那一行的「◀」买入。绿色的是本城招牌货，便宜。" % [GameData.port_name(home), gname]
+			text = "①点右边的「交易」，把「每次」切到「全部」，再按%s那一行的「买入」。绿色的是%s的招牌货，便宜。" % [gname, GameData.port_name(home)]
 		1:
 			text = "②点击地图上闪光的%s，再点「旗舰起航」。%s需要%s，会出高价。" % [dname, dname, gname]
 			map.highlight_port = tg["dest"]
 		2:
-			text = "③抵港后按「▶」卖出。「均价」是你这批货的成本，卖价高于它就是赚。" if sim.docked(fl) else "③航行中……右上角可以加速，抵港时会自动暂停。把鼠标移到港口上可以看到航程和卖价。"
+			text = "③抵港后点「交易」，按「卖出」。「成本」是你这批货的买价，卖价高于它就是赚。" if sim.docked(fl) else "③航行中……右上角可以加速，抵港时会自动暂停。把鼠标移到港口上可以看到航程和卖价。"
 		3:
 			text = "④继续跑商攒钱。名声到「船东」后就能开商馆、建工坊；金币够了去「船坞」买第二艘船。"
 		4:
