@@ -1,3 +1,4 @@
 build/
 godot/.godot/
 art-in/gen/
+__pycache__/
