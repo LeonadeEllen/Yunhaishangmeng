@@ -44,6 +44,8 @@ const SHOP_LOOKS := {
 const IDS := ["hero_lamp", "hero_iron", "hero_tower", "xiaoman", "luqing", "qian", "aman", "shen", "cen", "moyu", "ning", "feng", "sang",
 	"helan", "ling", "duoyin", "lusheng", "shop_trade", "shop_yard", "shop_hall", "shop_guild", "shop_tavern", "shop_bank"]
 const MOODS := ["", "happy", "upset"]
+## Characters that now have a commissioned painting in assets/art/portraits; the renderer leaves them alone.
+const PAINTED := ["luqing"]
 
 
 static func look_of(id: String) -> Dictionary:

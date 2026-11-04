@@ -26,6 +26,8 @@ func _init() -> void:
 	var only := OS.get_environment("ONLY")
 	var ids: Array = PortraitArt.IDS if only == "" else Array(only.split(","))
 	for id in ids:
+		if only == "" and id in PortraitArt.PAINTED:
+			continue
 		for mood in PortraitArt.MOODS:
 			cur_id = id
 			cur_mood = mood
